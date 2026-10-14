@@ -3,3 +3,5 @@ export type { RequestWithId } from './requestId.js';
 export { loggerMiddleware } from './logger.js';
 export { errorHandler, notFoundHandler, AppError } from './errorHandler.js';
 export type { ApiError } from './errorHandler.js';
+export { requireAuth } from './auth.js';
+export type { AuthenticatedRequest } from './auth.js';
