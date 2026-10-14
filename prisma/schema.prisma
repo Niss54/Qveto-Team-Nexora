@@ -1,0 +1,11 @@
+// Prisma Schema - Qveto Platform
+// Phase 1: Datasource configuration only. Full schema in Phase 2.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
