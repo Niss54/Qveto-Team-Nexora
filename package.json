@@ -1,0 +1,30 @@
+{
+  "name": "qveto-team-nexora",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Project Management & Team Collaboration SaaS - Team Nexora",
+  "scripts": {
+    "dev": "pnpm --parallel -r run dev",
+    "dev:api": "pnpm --filter @qveto/api run dev",
+    "dev:web": "pnpm --filter @qveto/web run dev",
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm --filter @qveto/api run test",
+    "test:e2e": "pnpm --filter @qveto/web run test:e2e",
+    "db:migrate": "pnpm --filter @qveto/api run db:migrate",
+    "db:generate": "pnpm --filter @qveto/api run db:generate",
+    "db:seed": "pnpm --filter @qveto/api run db:seed",
+    "db:reset": "pnpm --filter @qveto/api run db:reset",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\""
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "prisma": "6.19.3"
+  }
+}
