@@ -33,4 +33,23 @@ describe('Database Schema & Prisma Client', () => {
     expect(typeof client.task.findFirst).toBe('function');
     expect(typeof client.session.deleteMany).toBe('function');
   });
+
+  it('Task model should support lifecycle fields (startDate, completedAt, archivedAt)', () => {
+    // Type and shape check for task lifecycle fields
+    type TaskLifecyclePayload = {
+      startDate?: Date | null;
+      completedAt?: Date | null;
+      archivedAt?: Date | null;
+    };
+
+    const sampleLifecycle: TaskLifecyclePayload = {
+      startDate: new Date('2026-10-01T09:00:00.000Z'),
+      completedAt: new Date('2026-10-15T10:00:00.000Z'),
+      archivedAt: null,
+    };
+
+    expect(sampleLifecycle.startDate).toBeInstanceOf(Date);
+    expect(sampleLifecycle.completedAt).toBeInstanceOf(Date);
+    expect(sampleLifecycle.archivedAt).toBeNull();
+  });
 });

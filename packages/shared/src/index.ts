@@ -16,6 +16,17 @@ export type TaskStatus = z.infer<typeof TaskStatus>;
 export const TaskPriority = z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']);
 export type TaskPriority = z.infer<typeof TaskPriority>;
 
+/** Canonical task activity event types */
+export const TaskActivityType = z.enum([
+  'TASK_CREATED',
+  'TASK_UPDATED',
+  'TASK_STATUS_CHANGED',
+  'TASK_ASSIGNED',
+  'TASK_DUE_DATE_CHANGED',
+  'TASK_ARCHIVED',
+]);
+export type TaskActivityType = z.infer<typeof TaskActivityType>;
+
 // ============================================================
 // Auth Schemas
 // ============================================================
@@ -67,6 +78,61 @@ export const updateMemberRoleSchema = z.object({
 export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
 
 // ============================================================
+// Task Schemas (PRD 03 Shared Contract)
+// ============================================================
+
+export const createTaskSchema = z
+  .object({
+    title: z.string().min(1, 'Task title is required').max(255, 'Title too long'),
+    description: z.string().max(5000, 'Description too long').nullable().optional(),
+    status: TaskStatus.default('TODO'),
+    priority: TaskPriority.default('MEDIUM'),
+    startDate: z.coerce.date().nullable().optional(),
+    dueDate: z.coerce.date().nullable().optional(),
+    assigneeId: z.string().nullable().optional(),
+    parentTaskId: z.string().nullable().optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.startDate && data.dueDate) {
+        return data.startDate <= data.dueDate;
+      }
+      return true;
+    },
+    {
+      message: 'startDate must be before or equal to dueDate',
+      path: ['dueDate'],
+    }
+  );
+export type CreateTaskInput = z.infer<typeof createTaskSchema>;
+
+export const updateTaskSchema = z
+  .object({
+    title: z.string().min(1, 'Task title is required').max(255, 'Title too long').optional(),
+    description: z.string().max(5000, 'Description too long').nullable().optional(),
+    status: TaskStatus.optional(),
+    priority: TaskPriority.optional(),
+    startDate: z.coerce.date().nullable().optional(),
+    dueDate: z.coerce.date().nullable().optional(),
+    assigneeId: z.string().nullable().optional(),
+    position: z.number().int().nonnegative().optional(),
+    parentTaskId: z.string().nullable().optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.startDate && data.dueDate) {
+        return data.startDate <= data.dueDate;
+      }
+      return true;
+    },
+    {
+      message: 'startDate must be before or equal to dueDate',
+      path: ['dueDate'],
+    }
+  );
+export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
+
+// ============================================================
 // Response Schemas
 // ============================================================
 
@@ -100,6 +166,26 @@ export const organizationResponseSchema = z.object({
   memberCount: z.number().optional(),
 });
 export type OrganizationResponse = z.infer<typeof organizationResponseSchema>;
+
+export const taskResponseSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string().nullable().optional(),
+  status: TaskStatus,
+  priority: TaskPriority,
+  startDate: z.string().nullable().optional(),
+  dueDate: z.string().nullable().optional(),
+  completedAt: z.string().nullable().optional(),
+  archivedAt: z.string().nullable().optional(),
+  position: z.number(),
+  projectId: z.string(),
+  assigneeId: z.string().nullable().optional(),
+  creatorId: z.string(),
+  parentTaskId: z.string().nullable().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type TaskResponse = z.infer<typeof taskResponseSchema>;
 
 /** Standard error response shape */
 export const apiErrorSchema = z.object({

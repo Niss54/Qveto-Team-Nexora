@@ -204,7 +204,10 @@ model Task {
   description String?
   status      TaskStatus   @default(TODO)
   priority    TaskPriority @default(MEDIUM)
+  startDate   DateTime?
   dueDate     DateTime?
+  completedAt DateTime?
+  archivedAt  DateTime?
   position    Int          @default(0)
   projectId   String
   assigneeId  String?
@@ -224,11 +227,13 @@ model Task {
   attachments Attachment[]
 
   @@index([projectId])
+  @@index([projectId, archivedAt])
   @@index([assigneeId])
   @@index([creatorId])
   @@index([status])
   @@index([priority])
   @@index([dueDate])
+  @@index([completedAt])
   @@index([parentTaskId])
   @@map("tasks")
 }

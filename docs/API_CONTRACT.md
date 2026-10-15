@@ -110,6 +110,15 @@ All enums are defined in `@qveto/shared` and mirrored in Prisma schema.
 - `HIGH`: Urgent blocker or sprint priority
 - `URGENT`: Critical path / immediate resolution needed
 
+### 4.4 Canonical Task Activity Event Types (`TaskActivityType`)
+Defined in `@qveto/shared` and recorded in PostgreSQL `activity_events` table:
+- `TASK_CREATED`: Emitted when a new task is created under a project
+- `TASK_UPDATED`: Emitted on general property changes (title, description, priority, etc.)
+- `TASK_STATUS_CHANGED`: Emitted on status transitions (e.g. `TODO` -> `IN_PROGRESS`, `IN_REVIEW` -> `DONE`)
+- `TASK_ASSIGNED`: Emitted when assignee is assigned, reassigned, or unassigned
+- `TASK_DUE_DATE_CHANGED`: Emitted when task due date is scheduled, updated, or cleared
+- `TASK_ARCHIVED`: Emitted when a task is soft-archived
+
 ---
 
 ## 5. Roles & Permissions Matrix
@@ -400,3 +409,273 @@ Removes a member from the organization. Restricted to `OWNER`.
     "message": "Member removed successfully"
   }
   ```
+
+---
+
+### 6.4 Tasks & Lifecycle Management (PRD 03 Contract)
+
+> **Notice for Developers:** This section defines the agreed contract for the PRD 03 Task module. The Prisma models, safe migration, shared Zod schemas (`@qveto/shared`), and Activity Event contracts are active in the foundation. Route handlers are reserved for PRD 03 implementation.
+
+All task operations are strictly tenant-scoped through `Project -> Workspace -> Organization`. Never trust client-provided `orgId`.
+
+#### `GET /api/projects/:projectId/tasks`
+Lists tasks for an active project. Normal active task queries exclude soft-archived tasks by default (`archivedAt: null`).
+- **Auth:** Required (User must belong to the organization owning the project)
+- **Query Parameters:**
+  | Parameter | Type | Default | Description |
+  |---|---|---|---|
+  | `includeArchived` | `boolean` | `false` | When `false`, returns only active tasks (`archivedAt IS NULL`). When `true`, includes soft-archived tasks. |
+  | `status` | `TaskStatus` | — | Filter by status (`TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE`) |
+  | `priority` | `TaskPriority` | — | Filter by priority (`LOW`, `MEDIUM`, `HIGH`, `URGENT`) |
+  | `assigneeId` | `string` | — | Filter by assigned user ID |
+  | `page` | `number` | `1` | Pagination page number |
+  | `pageSize` | `number` | `20` | Items per page (max 100) |
+- **Response (200 OK):**
+  ```json
+  {
+    "data": [
+      {
+        "id": "tsk_cuid123",
+        "title": "Build Kanban Drag-and-Drop",
+        "description": "Sprint 3 workflow optimization",
+        "status": "IN_PROGRESS",
+        "priority": "HIGH",
+        "startDate": "2026-10-15T09:00:00.000Z",
+        "dueDate": "2026-10-22T18:00:00.000Z",
+        "completedAt": null,
+        "archivedAt": null,
+        "position": 1,
+        "projectId": "prj_cuid456",
+        "assigneeId": "usr_cuid789",
+        "creatorId": "usr_cuid001",
+        "parentTaskId": null,
+        "createdAt": "2026-10-15T09:00:00.000Z",
+        "updatedAt": "2026-10-15T11:30:00.000Z"
+      }
+    ],
+    "meta": {
+      "total": 42,
+      "page": 1,
+      "pageSize": 20,
+      "totalPages": 3
+    }
+  }
+  ```
+
+#### `POST /api/projects/:projectId/tasks`
+Creates a new task under the specified project.
+- **Auth:** Required (Organization member with permissions in project)
+- **Validation Rules:**
+  - `title`: Required, 1 to 255 characters.
+  - `startDate` & `dueDate`: If both are supplied, `startDate <= dueDate` is validated. Rejection code: `400 VALIDATION_ERROR`.
+  - `completedAt` & `archivedAt`: Cannot be set by client. `archivedAt` is initialized to `null`. If created directly with status `DONE`, `completedAt` is set to current server timestamp.
+- **Body:**
+  ```json
+  {
+    "title": "Design Database Performance Indexing",
+    "description": "Composite indexes on (projectId, archivedAt) and completedAt",
+    "status": "TODO",
+    "priority": "HIGH",
+    "startDate": "2026-10-16T09:00:00.000Z",
+    "dueDate": "2026-10-20T18:00:00.000Z",
+    "assigneeId": "usr_cuid789"
+  }
+  ```
+- **Response (201 Created):**
+  ```json
+  {
+    "task": {
+      "id": "tsk_cuid999",
+      "title": "Design Database Performance Indexing",
+      "description": "Composite indexes on (projectId, archivedAt) and completedAt",
+      "status": "TODO",
+      "priority": "HIGH",
+      "startDate": "2026-10-16T09:00:00.000Z",
+      "dueDate": "2026-10-20T18:00:00.000Z",
+      "completedAt": null,
+      "archivedAt": null,
+      "position": 0,
+      "projectId": "prj_cuid456",
+      "assigneeId": "usr_cuid789",
+      "creatorId": "usr_cuid001",
+      "parentTaskId": null,
+      "createdAt": "2026-10-15T14:00:00.000Z",
+      "updatedAt": "2026-10-15T14:00:00.000Z"
+    }
+  }
+  ```
+- **Activity Event Emitted:**
+  ```json
+  {
+    "type": "TASK_CREATED",
+    "entityType": "TASK",
+    "entityId": "tsk_cuid999",
+    "actorId": "usr_cuid001",
+    "orgId": "org_cuid123",
+    "metadata": {
+      "title": "Design Database Performance Indexing",
+      "projectId": "prj_cuid456",
+      "status": "TODO",
+      "priority": "HIGH"
+    }
+  }
+  ```
+
+#### `GET /api/tasks/:taskId`
+Retrieves a specific task with subtasks, labels, comments count, and attachments.
+- **Auth:** Required (Scoping verified: `task.projectId -> project.workspace.orgId`)
+- **Response (200 OK):**
+  ```json
+  {
+    "task": {
+      "id": "tsk_cuid123",
+      "title": "Build Kanban Drag-and-Drop",
+      "description": "Sprint 3 workflow optimization",
+      "status": "IN_PROGRESS",
+      "priority": "HIGH",
+      "startDate": "2026-10-15T09:00:00.000Z",
+      "dueDate": "2026-10-22T18:00:00.000Z",
+      "completedAt": null,
+      "archivedAt": null,
+      "position": 1,
+      "projectId": "prj_cuid456",
+      "assigneeId": "usr_cuid789",
+      "creatorId": "usr_cuid001",
+      "parentTaskId": null,
+      "createdAt": "2026-10-15T09:00:00.000Z",
+      "updatedAt": "2026-10-15T11:30:00.000Z",
+      "subtasks": [],
+      "labels": [],
+      "_count": {
+        "comments": 3,
+        "attachments": 1
+      }
+    }
+  }
+  ```
+
+#### `PATCH /api/tasks/:taskId`
+Updates task fields and manages lifecycle state transitions.
+- **Auth:** Required (Member of project organization)
+- **Lifecycle Semantics (Server-Managed):**
+  - **Transition to `DONE`:** When status transitions from a non-DONE state to `DONE`, server automatically sets `completedAt = new Date()`.
+  - **Transition away from `DONE`:** When status changes from `DONE` to `TODO`, `IN_PROGRESS`, or `IN_REVIEW`, server automatically resets `completedAt = null`.
+  - **Retaining `DONE`:** If a task is already `DONE` and an unrelated field is modified (e.g. title, priority), the existing `completedAt` timestamp is strictly preserved.
+  - **Client-Controlled Field Protection:** Clients cannot pass `completedAt` or `archivedAt` in request body.
+  - **Date Validation:** If both `startDate` and `dueDate` are present, `startDate <= dueDate` is enforced.
+- **Body:**
+  ```json
+  {
+    "status": "DONE",
+    "description": "Updated implementation notes"
+  }
+  ```
+- **Response (200 OK):**
+  ```json
+  {
+    "task": {
+      "id": "tsk_cuid123",
+      "status": "DONE",
+      "completedAt": "2026-10-15T15:20:00.000Z",
+      "archivedAt": null,
+      "updatedAt": "2026-10-15T15:20:00.000Z"
+    }
+  }
+  ```
+- **Activity Events Emitted:**
+  - Status change: Single `TASK_STATUS_CHANGED` with `metadata: { "fromStatus": "IN_PROGRESS", "toStatus": "DONE" }`.
+  - Assignee change: `TASK_ASSIGNED` with `metadata: { "previousAssigneeId": "usr_old", "newAssigneeId": "usr_new" }`.
+  - Due date change: `TASK_DUE_DATE_CHANGED` with `metadata: { "previousDueDate": "...", "newDueDate": "..." }`.
+  - General field edits: `TASK_UPDATED`.
+
+#### `POST /api/tasks/:taskId/archive`
+Soft-archives a task. Preserves the task, its activity history, comments, and attachments without deleting any database records.
+- **Auth:** Required (Project organization member with permission)
+- **Semantics:**
+  - Sets `archivedAt = new Date()` (server timestamp).
+  - Idempotent: If task is already archived, returns existing state with `200 OK`.
+  - Excluded from standard project task lists (`GET /api/projects/:projectId/tasks`) unless `includeArchived=true`.
+- **Response (200 OK):**
+  ```json
+  {
+    "task": {
+      "id": "tsk_cuid123",
+      "title": "Build Kanban Drag-and-Drop",
+      "archivedAt": "2026-10-15T15:25:00.000Z",
+      "updatedAt": "2026-10-15T15:25:00.000Z"
+    },
+    "message": "Task archived successfully"
+  }
+  ```
+- **Activity Event Emitted:**
+  ```json
+  {
+    "type": "TASK_ARCHIVED",
+    "entityType": "TASK",
+    "entityId": "tsk_cuid123",
+    "actorId": "usr_cuid001",
+    "orgId": "org_cuid123",
+    "metadata": {
+      "archivedAt": "2026-10-15T15:25:00.000Z"
+    }
+  }
+  ```
+
+---
+
+## 7. Single Activity Event Contract & PRD 04 Integration Guide
+
+### 7.1 Architecture & Storage
+All task events reuse the existing PostgreSQL `activity_events` table (Prisma model `ActivityEvent`). No secondary event table or event bus is introduced.
+
+```prisma
+model ActivityEvent {
+  id         String   @id @default(cuid())
+  type       String   // Canonical event types: TASK_CREATED, TASK_UPDATED, etc.
+  entityType String   // "TASK"
+  entityId   String   // taskId
+  actorId    String   // Authenticated user ID who performed the action
+  orgId      String   // Server-verified tenant ID
+  metadata   Json?    // Structured diff or context
+  createdAt  DateTime @default(now())
+}
+```
+
+### 7.2 Canonical Event Payloads
+Every task lifecycle action must generate an `ActivityEvent` with `entityType: "TASK"`, verified `orgId`, and the following metadata convention:
+
+| Event Type | Trigger | Metadata Schema |
+|---|---|---|
+| `TASK_CREATED` | New task created | `{"title": string, "projectId": string, "status": TaskStatus, "priority": TaskPriority}` |
+| `TASK_STATUS_CHANGED` | Task status transition | `{"fromStatus": TaskStatus, "toStatus": TaskStatus}` |
+| `TASK_ASSIGNED` | Assignee changed | `{"previousAssigneeId": string \| null, "newAssigneeId": string \| null}` |
+| `TASK_DUE_DATE_CHANGED` | Due date modified | `{"previousDueDate": string \| null, "newDueDate": string \| null}` |
+| `TASK_ARCHIVED` | Task soft-archived | `{"archivedAt": string}` |
+| `TASK_UPDATED` | Other fields changed | `{"changedFields": string[]}` |
+
+### 7.3 Critical Rule: Single Event on Completion
+When a task transitions from any status to `DONE`:
+- The task service MUST emit **one** `TASK_STATUS_CHANGED` event:
+  ```json
+  {
+    "type": "TASK_STATUS_CHANGED",
+    "entityType": "TASK",
+    "entityId": "tsk_123",
+    "actorId": "usr_456",
+    "orgId": "org_789",
+    "metadata": {
+      "fromStatus": "IN_REVIEW",
+      "toStatus": "DONE"
+    }
+  }
+  ```
+- **DO NOT** emit duplicate `TASK_COMPLETED` alongside `TASK_STATUS_CHANGED`. The `toStatus: "DONE"` transition is the single canonical representation of completion.
+
+### 7.4 PRD 04 Developer Integration Guide (Notifications & Activity Feed)
+The developer implementing notifications and activity feeds (PRD 04) should consume this contract as follows:
+1. **Activity History Feeds:** Query `activity_events` filtered by `entityType = "TASK" AND entityId = :taskId` or `orgId = :orgId` ordered by `createdAt DESC`.
+2. **Notification Dispatch:**
+   - On `TASK_ASSIGNED`: Send in-app notification (`model Notification`) to `newAssigneeId` if `newAssigneeId !== actorId`.
+   - On `TASK_STATUS_CHANGED` with `toStatus: "DONE"`: Notify task `creatorId` if `creatorId !== actorId`.
+   - On `TASK_DUE_DATE_CHANGED`: Notify task `assigneeId`.
+3. **No Redundant Schemas:** Use `@qveto/shared`'s `TaskActivityType` enum to type-check event handling across backend services.
