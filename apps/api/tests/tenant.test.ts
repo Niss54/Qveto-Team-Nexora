@@ -607,4 +607,27 @@ describe('Authorization & Multi-Tenant Isolation System', () => {
       expect(res.body.error.code).toBe('FORBIDDEN');
     });
   });
+
+  // ============================================================
+  // Cross-Tenant Attachment & Resource Access Denial (PRD line 149)
+  // ============================================================
+  describe('Cross-Tenant Attachment Metadata Access Denial', () => {
+    it('DENIES cross-tenant attachment metadata access using verifyResourceOrg', async () => {
+      const { verifyResourceOrg } = await import('../src/middleware/tenant.js');
+
+      // Alpha attachment belonging to Alpha Corp
+      const alphaAttachmentOrgId = orgAlphaId;
+      const bobVerifiedOrgId = orgBetaId;
+
+      // Bob in Beta attempting to access Alpha attachment metadata
+      expect(() => {
+        verifyResourceOrg(alphaAttachmentOrgId, bobVerifiedOrgId);
+      }).toThrowError(/Cross-organization access denied/i);
+
+      // Alice in Alpha accessing Alpha attachment metadata -> allowed
+      expect(() => {
+        verifyResourceOrg(alphaAttachmentOrgId, orgAlphaId);
+      }).not.toThrow();
+    });
+  });
 });
