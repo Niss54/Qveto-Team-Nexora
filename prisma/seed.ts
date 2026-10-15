@@ -1,5 +1,12 @@
+import path from 'path';
+import dotenv from 'dotenv';
 import { PrismaClient, OrgRole, TaskStatus, TaskPriority } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+
+// Load .env from project root and current working directory
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
+dotenv.config();
 
 const prisma = new PrismaClient();
 
