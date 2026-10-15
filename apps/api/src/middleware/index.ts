@@ -5,3 +5,5 @@ export { errorHandler, notFoundHandler, AppError } from './errorHandler.js';
 export type { ApiError } from './errorHandler.js';
 export { requireAuth } from './auth.js';
 export type { AuthenticatedRequest } from './auth.js';
+export { requireOrgMember, requireOrgRole, verifyResourceOrg } from './tenant.js';
+export type { OrgMembership, OrgScopedRequest } from './tenant.js';
