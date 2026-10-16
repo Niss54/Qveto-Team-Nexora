@@ -296,7 +296,8 @@ async function main() {
     const task4 = await prisma.task.create({
       data: {
         title: 'Implement Tenant Scoping Middleware & Cross-Org Isolation',
-        description: 'Block spoofed orgIds and prevent users in Org A from reading Org B resources.',
+        description:
+          'Block spoofed orgIds and prevent users in Org A from reading Org B resources.',
         status: TaskStatus.DONE,
         priority: TaskPriority.HIGH,
         startDate: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3),
@@ -347,7 +348,8 @@ async function main() {
     const task7 = await prisma.task.create({
       data: {
         title: 'In-App Notifications & Overdue Task Alerts',
-        description: 'Trigger notifications when assigned, commented on, or when tasks approach due date.',
+        description:
+          'Trigger notifications when assigned, commented on, or when tasks approach due date.',
         status: TaskStatus.TODO,
         priority: TaskPriority.MEDIUM,
         startDate: null,
@@ -379,7 +381,8 @@ async function main() {
     const task9Overdue = await prisma.task.create({
       data: {
         title: 'Review legacy API endpoints for deprecation',
-        description: 'Identify any unauthenticated endpoints and migrate to tenant-scoped middleware.',
+        description:
+          'Identify any unauthenticated endpoints and migrate to tenant-scoped middleware.',
         status: TaskStatus.IN_REVIEW,
         priority: TaskPriority.HIGH,
         startDate: new Date(Date.now() - 1000 * 60 * 60 * 24 * 10),

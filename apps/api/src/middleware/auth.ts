@@ -12,11 +12,7 @@ export interface AuthenticatedRequest extends Request {
  * Checks sessionId in HttpOnly cookie or Authorization Bearer header.
  * Attaches req.user and req.sessionId to the request object.
  */
-export async function requireAuth(
-  req: Request,
-  _res: Response,
-  next: NextFunction,
-): Promise<void> {
+export async function requireAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
   try {
     let sessionId: string | undefined = req.cookies?.sessionId;
 
@@ -32,7 +28,11 @@ export async function requireAuth(
 
     const user = await authService.validateSession(sessionId);
     if (!user) {
-      throw new AppError(401, 'UNAUTHORIZED', 'Session is invalid or has expired. Please sign in again.');
+      throw new AppError(
+        401,
+        'UNAUTHORIZED',
+        'Session is invalid or has expired. Please sign in again.',
+      );
     }
 
     (req as AuthenticatedRequest).user = user;

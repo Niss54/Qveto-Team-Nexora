@@ -161,7 +161,9 @@ organizationRouter.patch(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const orgReq = req as OrgScopedRequest;
-      const targetUserId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
+      const targetUserId = Array.isArray(req.params.userId)
+        ? req.params.userId[0]
+        : req.params.userId;
       const validated = updateMemberRoleSchema.parse(req.body);
       const updated = await organizationService.updateMemberRole(
         orgReq.orgId,
@@ -186,7 +188,9 @@ organizationRouter.delete(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const orgReq = req as OrgScopedRequest;
-      const targetUserId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
+      const targetUserId = Array.isArray(req.params.userId)
+        ? req.params.userId[0]
+        : req.params.userId;
       const result = await organizationService.removeMember(orgReq.orgId, targetUserId!);
       res.status(200).json(result);
     } catch (error) {

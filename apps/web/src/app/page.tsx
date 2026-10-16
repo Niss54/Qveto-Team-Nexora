@@ -23,7 +23,8 @@ export default function Home() {
         </h1>
 
         <p className="text-lg sm:text-xl text-gray-600 max-w-2xl mx-auto leading-relaxed">
-          Centralize ownership, priorities, deadlines, and progress with strict server-side tenant isolation and granular role-based security.
+          Centralize ownership, priorities, deadlines, and progress with strict server-side tenant
+          isolation and granular role-based security.
         </p>
 
         {/* Call to Action Buttons */}
@@ -65,7 +66,8 @@ export default function Home() {
             </div>
             <h3 className="text-lg font-bold text-gray-900 mb-1">Tenant Isolation</h3>
             <p className="text-sm text-gray-600">
-              Complete data partitioning. Users in Organization A cannot access or mutate resources in Organization B.
+              Complete data partitioning. Users in Organization A cannot access or mutate resources
+              in Organization B.
             </p>
           </div>
 
@@ -75,7 +77,8 @@ export default function Home() {
             </div>
             <h3 className="text-lg font-bold text-gray-900 mb-1">Granular RBAC</h3>
             <p className="text-sm text-gray-600">
-              Server-enforced roles for Owners, Managers, and Employees with strict safeguards against unauthorized operations.
+              Server-enforced roles for Owners, Managers, and Employees with strict safeguards
+              against unauthorized operations.
             </p>
           </div>
 
@@ -85,7 +88,8 @@ export default function Home() {
             </div>
             <h3 className="text-lg font-bold text-gray-900 mb-1">Fast &amp; Modern</h3>
             <p className="text-sm text-gray-600">
-              Built with Next.js 14 App Router, TypeScript, Tailwind CSS, Express, and PostgreSQL Prisma ORM.
+              Built with Next.js 14 App Router, TypeScript, Tailwind CSS, Express, and PostgreSQL
+              Prisma ORM.
             </p>
           </div>
         </div>

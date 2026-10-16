@@ -102,7 +102,7 @@ export const createTaskSchema = z
     {
       message: 'startDate must be before or equal to dueDate',
       path: ['dueDate'],
-    }
+    },
   );
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 
@@ -128,7 +128,7 @@ export const updateTaskSchema = z
     {
       message: 'startDate must be before or equal to dueDate',
       path: ['dueDate'],
-    }
+    },
   );
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 

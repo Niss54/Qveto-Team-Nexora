@@ -93,15 +93,11 @@ authRouter.post(
  * GET /api/auth/me
  * Returns current authenticated user profile.
  */
-authRouter.get(
-  '/me',
-  requireAuth,
-  (req: Request, res: Response): void => {
-    const authReq = req as AuthenticatedRequest;
-    res.status(200).json({
-      user: authReq.user,
-    });
-  },
-);
+authRouter.get('/me', requireAuth, (req: Request, res: Response): void => {
+  const authReq = req as AuthenticatedRequest;
+  res.status(200).json({
+    user: authReq.user,
+  });
+});
 
 export { authRouter };

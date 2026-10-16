@@ -101,11 +101,10 @@ export default function DashboardPage() {
           <span className="text-xs font-semibold uppercase tracking-wider text-primary-200">
             Platform Dashboard
           </span>
-          <h1 className="text-3xl font-bold tracking-tight mt-1">
-            Welcome back, {user.name}! 👋
-          </h1>
+          <h1 className="text-3xl font-bold tracking-tight mt-1">Welcome back, {user.name}! 👋</h1>
           <p className="text-primary-100 text-sm mt-2">
-            Secure multi-organization collaboration baseline. All actions and resources are scoped to your active tenant.
+            Secure multi-organization collaboration baseline. All actions and resources are scoped
+            to your active tenant.
           </p>
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -138,7 +137,9 @@ export default function DashboardPage() {
                 Organization Role
               </p>
               <div className="mt-2 flex items-center justify-between">
-                <span className="text-xl font-bold text-gray-900">{currentOrg.role || 'MEMBER'}</span>
+                <span className="text-xl font-bold text-gray-900">
+                  {currentOrg.role || 'MEMBER'}
+                </span>
                 {currentOrg.role && <RoleBadge role={currentOrg.role} />}
               </div>
             </div>
@@ -283,7 +284,8 @@ export default function DashboardPage() {
           </div>
           <h2 className="text-xl font-bold text-gray-900">No Organization Selected</h2>
           <p className="text-sm text-gray-500 max-w-md mx-auto mt-2">
-            You don&apos;t have an active organization selected. You can create a new organization to start collaborating.
+            You don&apos;t have an active organization selected. You can create a new organization
+            to start collaborating.
           </p>
           <button
             onClick={() => setModalOpen(true)}
@@ -294,10 +296,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <CreateOrgModal
-        isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-      />
+      <CreateOrgModal isOpen={modalOpen} onClose={() => setModalOpen(false)} />
     </div>
   );
 }

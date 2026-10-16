@@ -64,19 +64,21 @@ vi.mock('../src/lib/prisma.js', () => {
       }
       return null;
     }),
-    create: vi.fn(async ({ data }: { data: { email: string; name: string; passwordHash: string } }) => {
-      const user: MockUser = {
-        id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        email: data.email.toLowerCase(),
-        name: data.name,
-        passwordHash: data.passwordHash,
-        avatarUrl: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      mockUsers.push(user);
-      return user;
-    }),
+    create: vi.fn(
+      async ({ data }: { data: { email: string; name: string; passwordHash: string } }) => {
+        const user: MockUser = {
+          id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          email: data.email.toLowerCase(),
+          name: data.name,
+          passwordHash: data.passwordHash,
+          avatarUrl: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        mockUsers.push(user);
+        return user;
+      },
+    ),
   };
 
   const sessionMethods = {
@@ -118,18 +120,20 @@ vi.mock('../src/lib/prisma.js', () => {
         _count: { members: members.length },
       };
     }),
-    create: vi.fn(async ({ data }: { data: { name: string; slug: string; description?: string | null } }) => {
-      const org: MockOrg = {
-        id: `org_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        name: data.name,
-        slug: data.slug,
-        description: data.description || null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      mockOrgs.push(org);
-      return org;
-    }),
+    create: vi.fn(
+      async ({ data }: { data: { name: string; slug: string; description?: string | null } }) => {
+        const org: MockOrg = {
+          id: `org_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          name: data.name,
+          slug: data.slug,
+          description: data.description || null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        mockOrgs.push(org);
+        return org;
+      },
+    ),
     update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<MockOrg> }) => {
       const org = mockOrgs.find((o) => o.id === where.id);
       if (!org) throw new Error('Org not found');
@@ -141,16 +145,23 @@ vi.mock('../src/lib/prisma.js', () => {
   };
 
   const memberMethods = {
-    findUnique: vi.fn(async ({ where }: { where: { userId_orgId?: { userId: string; orgId: string }; id?: string } }) => {
-      if (where.userId_orgId) {
-        return (
-          mockMembers.find(
-            (m) => m.userId === where.userId_orgId!.userId && m.orgId === where.userId_orgId!.orgId,
-          ) || null
-        );
-      }
-      return null;
-    }),
+    findUnique: vi.fn(
+      async ({
+        where,
+      }: {
+        where: { userId_orgId?: { userId: string; orgId: string }; id?: string };
+      }) => {
+        if (where.userId_orgId) {
+          return (
+            mockMembers.find(
+              (m) =>
+                m.userId === where.userId_orgId!.userId && m.orgId === where.userId_orgId!.orgId,
+            ) || null
+          );
+        }
+        return null;
+      },
+    ),
     findMany: vi.fn(async ({ where }: { where: { userId?: string; orgId?: string } }) => {
       let list = mockMembers;
       if (where.userId) list = list.filter((m) => m.userId === where.userId);
@@ -198,51 +209,63 @@ vi.mock('../src/lib/prisma.js', () => {
           : null,
       };
     }),
-    update: vi.fn(async ({ where, data }: { where: { userId_orgId: { userId: string; orgId: string } }; data: { role: string } }) => {
-      const member = mockMembers.find(
-        (m) => m.userId === where.userId_orgId.userId && m.orgId === where.userId_orgId.orgId,
-      );
-      if (!member) throw new Error('Member not found');
-      member.role = data.role;
-      const user = mockUsers.find((u) => u.id === member.userId);
-      return {
-        ...member,
-        user: user
-          ? {
-              id: user.id,
-              email: user.email,
-              name: user.name,
-              avatarUrl: user.avatarUrl,
-              createdAt: user.createdAt,
-            }
-          : null,
-      };
-    }),
-    delete: vi.fn(async ({ where }: { where: { userId_orgId: { userId: string; orgId: string } } }) => {
-      const idx = mockMembers.findIndex(
-        (m) => m.userId === where.userId_orgId.userId && m.orgId === where.userId_orgId.orgId,
-      );
-      if (idx !== -1) return mockMembers.splice(idx, 1)[0];
-      throw new Error('Member not found');
-    }),
+    update: vi.fn(
+      async ({
+        where,
+        data,
+      }: {
+        where: { userId_orgId: { userId: string; orgId: string } };
+        data: { role: string };
+      }) => {
+        const member = mockMembers.find(
+          (m) => m.userId === where.userId_orgId.userId && m.orgId === where.userId_orgId.orgId,
+        );
+        if (!member) throw new Error('Member not found');
+        member.role = data.role;
+        const user = mockUsers.find((u) => u.id === member.userId);
+        return {
+          ...member,
+          user: user
+            ? {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                avatarUrl: user.avatarUrl,
+                createdAt: user.createdAt,
+              }
+            : null,
+        };
+      },
+    ),
+    delete: vi.fn(
+      async ({ where }: { where: { userId_orgId: { userId: string; orgId: string } } }) => {
+        const idx = mockMembers.findIndex(
+          (m) => m.userId === where.userId_orgId.userId && m.orgId === where.userId_orgId.orgId,
+        );
+        if (idx !== -1) return mockMembers.splice(idx, 1)[0];
+        throw new Error('Member not found');
+      },
+    ),
     count: vi.fn(async ({ where }: { where: { orgId: string; role: string } }) => {
       return mockMembers.filter((m) => m.orgId === where.orgId && m.role === where.role).length;
     }),
   };
 
   const workspaceMethods = {
-    create: vi.fn(async ({ data }: { data: { name: string; description?: string | null; orgId: string } }) => {
-      const ws: MockWorkspace = {
-        id: `ws_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        name: data.name,
-        description: data.description || null,
-        orgId: data.orgId,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      mockWorkspaces.push(ws);
-      return ws;
-    }),
+    create: vi.fn(
+      async ({ data }: { data: { name: string; description?: string | null; orgId: string } }) => {
+        const ws: MockWorkspace = {
+          id: `ws_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          name: data.name,
+          description: data.description || null,
+          orgId: data.orgId,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        mockWorkspaces.push(ws);
+        return ws;
+      },
+    ),
   };
 
   const prismaMock = {
@@ -266,10 +289,10 @@ const request = supertest(app);
 describe('Authorization & Multi-Tenant Isolation System', () => {
   // Synthetic test data
   let aliceCookie: string[]; // Org Alpha - OWNER
-  let markCookie: string[];  // Org Alpha - MANAGER
-  let ericCookie: string[];  // Org Alpha - EMPLOYEE
-  let bobCookie: string[];   // Org Beta - OWNER
-  let emmaCookie: string[];  // Org Beta - EMPLOYEE
+  let markCookie: string[]; // Org Alpha - MANAGER
+  let ericCookie: string[]; // Org Alpha - EMPLOYEE
+  let bobCookie: string[]; // Org Beta - OWNER
+  let emmaCookie: string[]; // Org Beta - EMPLOYEE
 
   let orgAlphaId: string;
   let orgBetaId: string;
@@ -354,13 +377,43 @@ describe('Authorization & Multi-Tenant Isolation System', () => {
 
     // 3. Assign Memberships
     // Org Alpha members
-    mockMembers.push({ id: 'mem_1', orgId: orgAlphaId, userId: aliceId, role: 'OWNER', joinedAt: new Date() });
-    mockMembers.push({ id: 'mem_2', orgId: orgAlphaId, userId: markId, role: 'MANAGER', joinedAt: new Date() });
-    mockMembers.push({ id: 'mem_3', orgId: orgAlphaId, userId: ericId, role: 'EMPLOYEE', joinedAt: new Date() });
+    mockMembers.push({
+      id: 'mem_1',
+      orgId: orgAlphaId,
+      userId: aliceId,
+      role: 'OWNER',
+      joinedAt: new Date(),
+    });
+    mockMembers.push({
+      id: 'mem_2',
+      orgId: orgAlphaId,
+      userId: markId,
+      role: 'MANAGER',
+      joinedAt: new Date(),
+    });
+    mockMembers.push({
+      id: 'mem_3',
+      orgId: orgAlphaId,
+      userId: ericId,
+      role: 'EMPLOYEE',
+      joinedAt: new Date(),
+    });
 
     // Org Beta members
-    mockMembers.push({ id: 'mem_4', orgId: orgBetaId, userId: bobId, role: 'OWNER', joinedAt: new Date() });
-    mockMembers.push({ id: 'mem_5', orgId: orgBetaId, userId: emmaId, role: 'EMPLOYEE', joinedAt: new Date() });
+    mockMembers.push({
+      id: 'mem_4',
+      orgId: orgBetaId,
+      userId: bobId,
+      role: 'OWNER',
+      joinedAt: new Date(),
+    });
+    mockMembers.push({
+      id: 'mem_5',
+      orgId: orgBetaId,
+      userId: emmaId,
+      role: 'EMPLOYEE',
+      joinedAt: new Date(),
+    });
   });
 
   // ============================================================
@@ -368,13 +421,10 @@ describe('Authorization & Multi-Tenant Isolation System', () => {
   // ============================================================
   describe('Organization CRUD', () => {
     it('POST /api/organizations should create org and set creator as OWNER', async () => {
-      const res = await request
-        .post('/api/organizations')
-        .set('Cookie', aliceCookie)
-        .send({
-          name: 'New Horizon',
-          description: 'A new startup',
-        });
+      const res = await request.post('/api/organizations').set('Cookie', aliceCookie).send({
+        name: 'New Horizon',
+        description: 'A new startup',
+      });
 
       expect(res.status).toBe(201);
       expect(res.body.organization.name).toBe('New Horizon');
@@ -383,9 +433,7 @@ describe('Authorization & Multi-Tenant Isolation System', () => {
     });
 
     it('GET /api/organizations should list only organizations the user belongs to', async () => {
-      const res = await request
-        .get('/api/organizations')
-        .set('Cookie', aliceCookie);
+      const res = await request.get('/api/organizations').set('Cookie', aliceCookie);
 
       expect(res.status).toBe(200);
       expect(res.body.organizations).toHaveLength(1);
@@ -414,9 +462,7 @@ describe('Authorization & Multi-Tenant Isolation System', () => {
     });
 
     it('DENIES User B (from Beta Ltd) access to view Alpha Corp details', async () => {
-      const resBob = await request
-        .get(`/api/organizations/${orgAlphaId}`)
-        .set('Cookie', bobCookie);
+      const resBob = await request.get(`/api/organizations/${orgAlphaId}`).set('Cookie', bobCookie);
 
       expect(resBob.status).toBe(403);
       expect(resBob.body.error.code).toBe('FORBIDDEN');
@@ -495,13 +541,11 @@ describe('Authorization & Multi-Tenant Isolation System', () => {
 
     it('OWNER can add a registered user to the organization', async () => {
       // Register a user first
-      await request
-        .post('/api/auth/register')
-        .send({
-          email: 'newuser@alpha.com',
-          password: 'Password123!',
-          name: 'New Alpha Member',
-        });
+      await request.post('/api/auth/register').send({
+        email: 'newuser@alpha.com',
+        password: 'Password123!',
+        name: 'New Alpha Member',
+      });
 
       const res = await request
         .post(`/api/organizations/${orgAlphaId}/members`)

@@ -336,11 +336,7 @@ export class OrganizationService {
       });
 
       if (ownerCount <= 1) {
-        throw new AppError(
-          400,
-          'BAD_REQUEST',
-          'Cannot remove the sole organization owner.',
-        );
+        throw new AppError(400, 'BAD_REQUEST', 'Cannot remove the sole organization owner.');
       }
     }
 

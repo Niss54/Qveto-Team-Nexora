@@ -9,11 +9,7 @@ export const metadata: Metadata = {
     'Multi-organization project management and team collaboration SaaS by Team Nexora. Secure tenant isolation and RBAC.',
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className="antialiased min-h-screen bg-gray-50 text-gray-900 selection:bg-primary-500 selection:text-white">

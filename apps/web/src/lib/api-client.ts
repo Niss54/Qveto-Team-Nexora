@@ -3,10 +3,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 /**
  * Centralized API client with credentials support and error handling.
  */
-export async function apiClient<T>(
-  endpoint: string,
-  options: RequestInit = {},
-): Promise<T> {
+export async function apiClient<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
 
   const res = await fetch(url, {
@@ -56,6 +53,5 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
-  delete: <T>(endpoint: string) =>
-    apiClient<T>(endpoint, { method: 'DELETE' }),
+  delete: <T>(endpoint: string) => apiClient<T>(endpoint, { method: 'DELETE' }),
 };

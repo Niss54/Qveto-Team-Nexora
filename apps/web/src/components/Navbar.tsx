@@ -120,10 +120,7 @@ export function Navbar() {
                   <div className="w-9 h-9 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center font-bold text-sm border border-primary-200 shadow-sm">
                     {user.name.charAt(0).toUpperCase()}
                   </div>
-                  <button
-                    onClick={handleLogout}
-                    className="btn-secondary text-xs py-1.5 px-3 ml-1"
-                  >
+                  <button onClick={handleLogout} className="btn-secondary text-xs py-1.5 px-3 ml-1">
                     Logout
                   </button>
                 </div>
@@ -142,10 +139,7 @@ export function Navbar() {
         </div>
       </header>
 
-      <CreateOrgModal
-        isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-      />
+      <CreateOrgModal isOpen={modalOpen} onClose={() => setModalOpen(false)} />
     </>
   );
 }

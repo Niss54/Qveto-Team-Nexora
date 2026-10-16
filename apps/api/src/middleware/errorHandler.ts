@@ -34,12 +34,7 @@ export class AppError extends Error {
  * Catches all errors and returns consistent JSON error responses.
  * Never leaks stack traces or secrets to clients.
  */
-export function errorHandler(
-  err: Error,
-  req: Request,
-  res: Response,
-  _next: NextFunction,
-): void {
+export function errorHandler(err: Error, req: Request, res: Response, _next: NextFunction): void {
   const requestId = (req as RequestWithId).id;
 
   // Zod validation errors

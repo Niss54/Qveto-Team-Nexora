@@ -49,9 +49,7 @@ describe('Error Handling', () => {
 
   it('should include request ID in error responses', async () => {
     const customRequestId = 'test-request-123';
-    const res = await request
-      .get('/api/nonexistent')
-      .set('X-Request-ID', customRequestId);
+    const res = await request.get('/api/nonexistent').set('X-Request-ID', customRequestId);
 
     expect(res.status).toBe(404);
     expect(res.body.error.requestId).toBe(customRequestId);
@@ -60,9 +58,7 @@ describe('Error Handling', () => {
 
 describe('CORS', () => {
   it('should include CORS headers for allowed origin', async () => {
-    const res = await request
-      .get('/api/health')
-      .set('Origin', 'http://localhost:3000');
+    const res = await request.get('/api/health').set('Origin', 'http://localhost:3000');
 
     expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3000');
     expect(res.headers['access-control-allow-credentials']).toBe('true');

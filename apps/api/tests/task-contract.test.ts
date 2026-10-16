@@ -80,8 +80,13 @@ describe('Shared Task Contract & Activity Event Schemas (PRD 03)', () => {
     });
 
     it('should accept task when only startDate or only dueDate is provided', () => {
-      expect(createTaskSchema.safeParse({ title: 'Task with only start', startDate: '2026-10-16' }).success).toBe(true);
-      expect(createTaskSchema.safeParse({ title: 'Task with only due', dueDate: '2026-10-20' }).success).toBe(true);
+      expect(
+        createTaskSchema.safeParse({ title: 'Task with only start', startDate: '2026-10-16' })
+          .success,
+      ).toBe(true);
+      expect(
+        createTaskSchema.safeParse({ title: 'Task with only due', dueDate: '2026-10-20' }).success,
+      ).toBe(true);
       expect(createTaskSchema.safeParse({ title: 'Task with no dates' }).success).toBe(true);
     });
   });

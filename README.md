@@ -11,6 +11,7 @@
 Qveto is a responsive, full-stack multi-tenant SaaS application that centralizes ownership, priorities, deadlines, dependencies, and work status across organizations, workspaces, teams, projects, and tasks.
 
 This repository establishes the **P0 Platform Foundation**:
+
 - **Multi-Tenant Architecture:** Strict server-side organization isolation. Users in Organization A can never read or mutate Organization B's resources.
 - **Robust Authentication:** Server-managed sessions stored in PostgreSQL with secure `HttpOnly`, `SameSite=Lax` cookies, generic error handling, and `bcryptjs` password hashing.
 - **Granular RBAC:** Server-enforced capabilities for `OWNER`, `MANAGER`, and `EMPLOYEE`.
@@ -22,15 +23,15 @@ This repository establishes the **P0 Platform Foundation**:
 
 ## 🛠️ Tech Stack
 
-| Layer | Technologies |
-|---|---|
-| **Frontend** | Next.js 14 (App Router), React 18, TypeScript, Tailwind CSS |
-| **Backend** | Node.js, Express 4 / 5, TypeScript |
-| **Database** | PostgreSQL, Prisma ORM 6 |
-| **Validation** | Zod (Shared schemas in `@qveto/shared`) |
-| **Security** | `bcryptjs`, `cookie-parser`, `helmet`, `cors`, server-side session management |
-| **Testing** | Vitest (Unit & Integration), Supertest (API), Playwright (E2E) |
-| **Package Manager** | `pnpm` workspaces |
+| Layer               | Technologies                                                                  |
+| ------------------- | ----------------------------------------------------------------------------- |
+| **Frontend**        | Next.js 14 (App Router), React 18, TypeScript, Tailwind CSS                   |
+| **Backend**         | Node.js, Express 4 / 5, TypeScript                                            |
+| **Database**        | PostgreSQL, Prisma ORM 6                                                      |
+| **Validation**      | Zod (Shared schemas in `@qveto/shared`)                                       |
+| **Security**        | `bcryptjs`, `cookie-parser`, `helmet`, `cors`, server-side session management |
+| **Testing**         | Vitest (Unit & Integration), Supertest (API), Playwright (E2E)                |
+| **Package Manager** | `pnpm` workspaces                                                             |
 
 ---
 
@@ -73,11 +74,13 @@ This repository establishes the **P0 Platform Foundation**:
 ## ⚡ Quick Start Guide
 
 ### 1. Prerequisites
+
 - **Node.js:** v18.0.0 or higher (v22+ recommended)
 - **pnpm:** v8.0.0 or higher (`npm install -g pnpm`)
 - **PostgreSQL:** Local PostgreSQL or cloud PostgreSQL (e.g. Supabase, Neon)
 
 ### 2. Clone and Install
+
 ```bash
 git clone https://github.com/Niss54/Qveto-Team-Nexora.git
 cd Qveto-Team-Nexora
@@ -86,17 +89,22 @@ pnpm install
 ```
 
 ### 3. Environment Setup
+
 Copy `.env.example` to `.env`:
+
 ```bash
 cp .env.example .env
 ```
+
 Fill in your `DATABASE_URL`:
+
 ```env
 DATABASE_URL="postgresql://postgres:[PASSWORD]@[HOST]:[PORT]/[DATABASE]"
 SESSION_SECRET="your-super-secret-random-key-at-least-32-chars-long"
 ```
 
 ### 4. Database Setup & Seeding
+
 ```bash
 # Generate Prisma Client
 pnpm db:generate
@@ -109,12 +117,14 @@ pnpm db:seed
 ```
 
 ### 5. Start Development Servers
+
 ```bash
 # Runs both API (http://localhost:4000) and Web (http://localhost:3000) in parallel
 pnpm dev
 ```
 
 Or run services individually:
+
 ```bash
 pnpm dev:api   # API only (port 4000)
 pnpm dev:web   # Web only (port 3000)
@@ -127,16 +137,18 @@ pnpm dev:web   # Web only (port 3000)
 The database seed provides two separate organizations to demonstrate **multi-tenant isolation** and **role-based access control**:
 
 ### 🏢 Organization A: Nexora Corp (`/nexora-corp`)
-| Role | Email | Password | Permissions |
-|---|---|---|---|
-| **OWNER** | `owner@nexora.com` | `Password123!` | Full administration, member invite/removal, org settings |
-| **MANAGER** | `manager@nexora.com` | `Password123!` | Workspace & project management, cannot alter org settings |
-| **EMPLOYEE** | `employee@nexora.com` | `Password123!` | Task collaboration & assignments, member access |
+
+| Role         | Email                 | Password       | Permissions                                               |
+| ------------ | --------------------- | -------------- | --------------------------------------------------------- |
+| **OWNER**    | `owner@nexora.com`    | `Password123!` | Full administration, member invite/removal, org settings  |
+| **MANAGER**  | `manager@nexora.com`  | `Password123!` | Workspace & project management, cannot alter org settings |
+| **EMPLOYEE** | `employee@nexora.com` | `Password123!` | Task collaboration & assignments, member access           |
 
 ### 🏢 Organization B: Rival Inc (`/rival-inc`) — Isolation Target
-| Role | Email | Password | Permissions |
-|---|---|---|---|
-| **OWNER** | `owner@rival.com` | `Password123!` | Isolated from Nexora Corp resources |
+
+| Role         | Email                | Password       | Permissions                                        |
+| ------------ | -------------------- | -------------- | -------------------------------------------------- |
+| **OWNER**    | `owner@rival.com`    | `Password123!` | Isolated from Nexora Corp resources                |
 | **EMPLOYEE** | `employee@rival.com` | `Password123!` | Cannot view or access Nexora Corp tasks or members |
 
 ---
@@ -144,16 +156,20 @@ The database seed provides two separate organizations to demonstrate **multi-ten
 ## 🧪 Testing & Quality Assurance
 
 ### Run Unit & Integration Tests (Vitest)
+
 ```bash
 pnpm test
 ```
+
 **Test Coverage (39/39 Passing):**
+
 - **Health & Error Handling (`health.test.ts`):** 6 tests (status, uptime, consistent error shape, request ID tracing, CORS headers)
 - **Database Schema (`db.test.ts`):** 2 tests (Prisma client instantiation, verification of all 16 domain models and CRUD methods)
 - **Authentication (`auth.test.ts`):** 13 tests (registration, duplicate email 409, short password 400, valid login, invalid password 401, account enumeration defense, session cookie verification, session expiration, logout)
 - **Tenant Isolation & RBAC (`tenant.test.ts`):** 18 tests (cross-tenant read denial 403, cross-tenant mutation denial 403, manager/employee restriction, sole owner protection 400, spoofed orgId rejection)
 
 ### Run Code Quality Checks
+
 ```bash
 # TypeScript Typecheck (Whole Monorepo)
 pnpm typecheck
