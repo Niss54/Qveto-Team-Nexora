@@ -1,4 +1,4 @@
-﻿-- CreateEnum
+-- CreateEnum
 CREATE TYPE "OrgRole" AS ENUM ('OWNER', 'MANAGER', 'EMPLOYEE');
 
 -- CreateEnum
