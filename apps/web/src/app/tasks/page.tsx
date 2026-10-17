@@ -17,10 +17,22 @@ type Task = {
   position: number;
   parentTaskId: string | null;
   dueDate: string | null;
+  startDate?: string | null;
+  assigneeId?: string | null;
+  updatedAt?: string;
   completedAt: string | null;
 };
 type Label = { id: string; name: string; color: string };
+type OrgMember = { userId: string; user: { id: string; name: string; email: string } };
+
+function dateValue(value: string | null | undefined): string {
+  return value ? value.slice(0, 10) : '';
+}
+function isoDate(value: string): string | null {
+  return value ? `${value}T00:00:00.000Z` : null;
+}
 type Board = { columns: Record<Status, Task[]>; total: number };
+type TaskList = { data: Task[]; meta: { total: number; page: number; pageSize: number; totalPages: number } };
 
 const statuses: Status[] = ['TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE'];
 const names: Record<Status, string> = {
@@ -55,6 +67,11 @@ export default function TasksPage() {
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Priority>('MEDIUM');
   const [status, setStatus] = useState<Status>('TODO');
+  const [startDate, setStartDate] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [assigneeId, setAssigneeId] = useState('');
+  const [members, setMembers] = useState<OrgMember[]>([]);
+  const [membersError, setMembersError] = useState('');
   const [editing, setEditing] = useState(false);
   const [labels, setLabels] = useState<Label[]>([]);
   const [availableLabels, setAvailableLabels] = useState<Label[]>([]);
@@ -62,6 +79,24 @@ export default function TasksPage() {
   const [subtasks, setSubtasks] = useState<Task[]>([]);
   const [subtaskTitle, setSubtaskTitle] = useState('');
   const [draggedId, setDraggedId] = useState<string | null>(null);
+  // Task-list filters are server-side and do not change Kanban drag-and-drop positions.
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterPriority, setFilterPriority] = useState('');
+  const [filterAssignee, setFilterAssignee] = useState('');
+  const [filterLabel, setFilterLabel] = useState('');
+  const [filterDueAfter, setFilterDueAfter] = useState('');
+  const [filterDueBefore, setFilterDueBefore] = useState('');
+  const [filterOverdue, setFilterOverdue] = useState(false);
+  const [filterPage, setFilterPage] = useState(1);
+  const [filterPageSize, setFilterPageSize] = useState(10);
+  const [filteredTasks, setFilteredTasks] = useState<TaskList>({
+    data: [], meta: { total: 0, page: 1, pageSize: 10, totalPages: 0 },
+  });
+  const [filterLoading, setFilterLoading] = useState(false);
+  const [filterError, setFilterError] = useState('');
+  const [filterLabels, setFilterLabels] = useState<Label[]>([]);
+  const [filterMembers, setFilterMembers] = useState<OrgMember[]>([]);
+
 
   useEffect(() => {
     if (!authLoading && !user) router.replace('/login');
@@ -92,6 +127,65 @@ export default function TasksPage() {
   }, [projectId, currentOrg]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // Fetch choices independently of the task-details dialog.
+  useEffect(() => {
+    let active = true;
+    setFilterLabels([]);
+    if (!projectId || !currentOrg) return;
+    void api.get<{ data: Label[] }>(`/api/projects/${encodeURIComponent(projectId)}/labels`)
+      .then((result) => { if (active) setFilterLabels(result.data); })
+      .catch(() => { if (active) setFilterLabels([]); });
+    return () => { active = false; };
+  }, [projectId, currentOrg]);
+
+  useEffect(() => {
+    let active = true;
+    setFilterMembers([]);
+    if (!currentOrg?.id) return;
+    void api.get<{ data?: OrgMember[]; members?: OrgMember[] }>(`/api/organizations/${encodeURIComponent(currentOrg.id)}/members`)
+      .then((result) => {
+        if (active) setFilterMembers(Array.isArray(result.data) ? result.data : Array.isArray(result.members) ? result.members : []);
+      })
+      .catch(() => { if (active) setFilterMembers([]); });
+    return () => { active = false; };
+  }, [currentOrg?.id]);
+
+  // The API performs filtering *before* pagination, preserving accurate result totals.
+  // Board refreshes (after edits, moves, or new tasks) also refresh the filtered list.
+  useEffect(() => {
+    let active = true;
+    if (!projectId || !currentOrg) {
+      setFilteredTasks({ data: [], meta: { total: 0, page: 1, pageSize: filterPageSize, totalPages: 0 } });
+      return;
+    }
+    if (filterDueAfter && filterDueBefore && filterDueAfter > filterDueBefore) {
+      setFilterError('Due date from must be before or equal to due date through.');
+      return;
+    }
+    const params = new URLSearchParams({ page: String(filterPage), pageSize: String(filterPageSize) });
+    if (filterStatus) params.set('status', filterStatus);
+    if (filterPriority) params.set('priority', filterPriority);
+    if (filterAssignee) params.set('assigneeId', filterAssignee);
+    if (filterLabel) params.set('labelId', filterLabel);
+    if (filterDueAfter) params.set('dueAfter', filterDueAfter);
+    if (filterDueBefore) params.set('dueBefore', filterDueBefore);
+    if (filterOverdue) params.set('overdue', 'true');
+    setFilterLoading(true);
+    setFilterError('');
+    void api.get<TaskList>(`/api/projects/${encodeURIComponent(projectId)}/tasks?${params.toString()}`)
+      .then((result) => { if (active) setFilteredTasks(result); })
+      .catch((err: unknown) => { if (active) setFilterError(message(err)); })
+      .finally(() => { if (active) setFilterLoading(false); });
+    return () => { active = false; };
+  }, [projectId, currentOrg, board, filterStatus, filterPriority, filterAssignee, filterLabel,
+    filterDueAfter, filterDueBefore, filterOverdue, filterPage, filterPageSize]);
+
+  const clearFilters = () => {
+    setFilterStatus(''); setFilterPriority(''); setFilterAssignee(''); setFilterLabel('');
+    setFilterDueAfter(''); setFilterDueBefore(''); setFilterOverdue(false); setFilterPage(1);
+  };
+
 
 
   const chooseProject = (event: FormEvent<HTMLFormElement>) => {
@@ -132,29 +226,88 @@ export default function TasksPage() {
   const openTask = async (task: Task) => {
     setSelected(task); setEditing(false); setLabels([]); setSubtasks([]);
     setTitle(task.title); setDescription(task.description ?? ''); setPriority(task.priority);
-    setStatus(task.status); setError('');
+    setStatus(task.status); setStartDate(dateValue(task.startDate));
+    setDueDate(dateValue(task.dueDate)); setAssigneeId(task.assigneeId ?? '');
+    setMembers([]); setMembersError(''); setError('');
     try {
-      const [assigned, available, children] = await Promise.all([
+      const [detail, assigned, available, children] = await Promise.all([
+        api.get<{ task: Task }>(`/api/tasks/${task.id}`),
         api.get<{ data: Label[] }>(`/api/tasks/${task.id}/labels`),
         api.get<{ data: Label[] }>(`/api/projects/${encodeURIComponent(projectId)}/labels`),
         api.get<{ data: Task[] }>(`/api/tasks/${task.id}/subtasks`),
       ]);
+      const full = detail.task;
+      setSelected(full);
+      setTitle(full.title); setDescription(full.description ?? ''); setPriority(full.priority);
+      setStatus(full.status); setStartDate(dateValue(full.startDate));
+      setDueDate(dateValue(full.dueDate)); setAssigneeId(full.assigneeId ?? '');
       setLabels(assigned.data); setAvailableLabels(available.data); setSubtasks(children.data);
     } catch (err) { setError(message(err)); }
+    if (currentOrg?.id) {
+      try {
+        const result = await api.get<{ data?: OrgMember[]; members?: OrgMember[] }>(`/api/organizations/${encodeURIComponent(currentOrg.id)}/members`);
+        setMembers(Array.isArray(result.data) ? result.data : Array.isArray(result.members) ? result.members : []);
+      } catch (err) {
+        setMembersError(`Member list unavailable: ${message(err)}. Existing assignment is preserved unless changed.`);
+      }
+    }
   };
 
   const saveTask = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selected || !title.trim()) return;
+    if (startDate && dueDate && startDate > dueDate) {
+      setError('Due date must be on or after start date.');
+      return;
+    }
     setBusy(true); setError('');
     try {
-      await api.patch(`/api/tasks/${selected.id}`, {
+      const originalStatus = selected.status;
+      const patch = await api.patch<{ task: Task }>(`/api/tasks/${selected.id}`, {
         title: title.trim(), description: description.trim() || null, priority,
+        startDate: isoDate(startDate), dueDate: isoDate(dueDate),
+        assigneeId: assigneeId || null,
       });
-      setEditing(false); setSelected(null);
+      let saved = patch.task;
+      setSelected(saved);
+      if (status !== originalStatus) {
+        const destinationIndex = (board.columns[status] ?? []).length;
+        await api.patch(`/api/projects/${encodeURIComponent(projectId)}/kanban/move`, {
+          taskId: selected.id, status, targetIndex: destinationIndex,
+        });
+        const latest = await api.get<{ task: Task }>(`/api/tasks/${selected.id}`);
+        saved = latest.task;
+        setSelected(saved);
+      }
+      setTitle(saved.title); setDescription(saved.description ?? ''); setPriority(saved.priority);
+      setStatus(saved.status); setStartDate(dateValue(saved.startDate));
+      setDueDate(dateValue(saved.dueDate)); setAssigneeId(saved.assigneeId ?? '');
+      setEditing(false);
       await refresh();
-    } catch (err) { setError(message(err)); }
-    finally { setBusy(false); }
+    } catch (err) {
+      setError(`${message(err)}. Some changes may have saved; refresh before retrying.`);
+      try {
+        const latest = await api.get<{ task: Task }>(`/api/tasks/${selected.id}`);
+        setSelected(latest.task);
+        await refresh();
+      } catch { /* Preserve the original error. */ }
+    } finally { setBusy(false); }
+  };
+
+  const cancelEdit = () => {
+    if (!selected) return;
+    setTitle(selected.title); setDescription(selected.description ?? '');
+    setPriority(selected.priority); setStatus(selected.status);
+    setStartDate(dateValue(selected.startDate)); setDueDate(dateValue(selected.dueDate));
+    setAssigneeId(selected.assigneeId ?? '');
+    setEditing(false); setError('');
+  };
+
+  const closeTask = () => {
+    if (busy) return;
+    if (editing && !window.confirm('Discard unsaved task changes?')) return;
+    setEditing(false);
+    setSelected(null);
   };
 
   const archive = async () => {
@@ -193,7 +346,13 @@ export default function TasksPage() {
     setBusy(true); setError('');
     try {
       const res = await api.post<{ label: Label }>(`/api/projects/${encodeURIComponent(projectId)}/labels`, { name: newLabel.trim() });
-      setAvailableLabels((prev) => [...prev, res.label]); setNewLabel('');
+            setAvailableLabels((prev) => [...prev, res.label]);
+      setFilterLabels((prev) =>
+        prev.some((label) => label.id === res.label.id)
+          ? prev
+          : [...prev, res.label]
+      );
+      setNewLabel('');
     } catch (err) { setError(message(err)); }
     finally { setBusy(false); }
   };
@@ -271,16 +430,103 @@ export default function TasksPage() {
           </div>)}
         </section>
         {loading && <p role="status" className="text-sm text-gray-500">Loading board...</p>}
+
+        <section aria-label="Filtered tasks" className="card space-y-4 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Filter tasks</h2>
+              <p className="text-sm text-gray-500">Server-side filtering and pagination. The Kanban board above remains unfiltered.</p>
+            </div>
+            <button type="button" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" onClick={clearFilters}>Clear filters</button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="text-sm font-medium">Filter status
+              <select aria-label="Filter status" className="input-field mt-1 w-full" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setFilterPage(1); }}>
+                <option value="">All statuses</option>{statuses.map((item) => <option key={item} value={item}>{names[item]}</option>)}
+              </select>
+            </label>
+            <label className="text-sm font-medium">Filter priority
+              <select aria-label="Filter priority" className="input-field mt-1 w-full" value={filterPriority} onChange={(e) => { setFilterPriority(e.target.value); setFilterPage(1); }}>
+                <option value="">All priorities</option>{(['LOW','MEDIUM','HIGH','URGENT'] as Priority[]).map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </label>
+            <label className="text-sm font-medium">Filter assignee
+              <select aria-label="Filter assignee" className="input-field mt-1 w-full" value={filterAssignee} onChange={(e) => { setFilterAssignee(e.target.value); setFilterPage(1); }}>
+                <option value="">All assignees</option>
+                {filterMembers.map((member) => <option key={member.userId} value={member.userId}>{member.user.name} ({member.user.email})</option>)}
+              </select>
+            </label>
+            <label className="text-sm font-medium">Filter label
+              <select aria-label="Filter label" className="input-field mt-1 w-full" value={filterLabel} onChange={(e) => { setFilterLabel(e.target.value); setFilterPage(1); }}>
+                <option value="">All labels</option>{filterLabels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}
+              </select>
+            </label>
+            <label className="text-sm font-medium">Due date from
+              <input aria-label="Due date from" className="input-field mt-1 w-full" type="date" value={filterDueAfter} onChange={(e) => { setFilterDueAfter(e.target.value); setFilterPage(1); }} />
+            </label>
+            <label className="text-sm font-medium">Due date through
+              <input aria-label="Due date through" className="input-field mt-1 w-full" type="date" value={filterDueBefore} onChange={(e) => { setFilterDueBefore(e.target.value); setFilterPage(1); }} />
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input aria-label="Overdue tasks only" type="checkbox" checked={filterOverdue} onChange={(e) => { setFilterOverdue(e.target.checked); setFilterPage(1); }} />
+              Overdue tasks only
+            </label>
+            <label className="text-sm font-medium">Results per page
+              <select aria-label="Results per page" className="input-field mt-1 w-full" value={filterPageSize} onChange={(e) => { setFilterPageSize(Number(e.target.value)); setFilterPage(1); }}>
+                {[5,10,20,50].map((count) => <option key={count} value={count}>{count}</option>)}
+              </select>
+            </label>
+          </div>
+          {filterError && <p role="alert" className="text-sm text-red-700">{filterError}</p>}
+          {filterLoading ? <p role="status" className="text-sm text-gray-500">Loading filtered tasks...</p> : (
+            <div className="space-y-2">
+              <p className="text-sm text-gray-600">{filteredTasks.meta.total} matching tasks · Page {filteredTasks.meta.page} of {Math.max(1, filteredTasks.meta.totalPages)}</p>
+              {filteredTasks.data.map((task) => (
+                <div key={task.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 p-3">
+                  <button type="button" className="text-left text-sm font-semibold text-indigo-700 hover:underline" onClick={() => void openTask(task)}>{task.title}</button>
+                  <span className="text-xs text-gray-600">{names[task.status]} · {task.priority}{task.dueDate ? ` · Due ${dateValue(task.dueDate)}` : ''}</span>
+                </div>
+              ))}
+              {filteredTasks.data.length === 0 && !filterError && <p className="text-sm text-gray-500">No tasks match these filters.</p>}
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-3">
+            <button type="button" className="rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-40" disabled={filterLoading || filterPage <= 1} onClick={() => setFilterPage((page) => Math.max(1, page - 1))}>Previous</button>
+            <span className="text-sm text-gray-600">Page {filterPage}</span>
+            <button type="button" className="rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-40" disabled={filterLoading || filterPage >= filteredTasks.meta.totalPages} onClick={() => setFilterPage((page) => page + 1)}>Next</button>
+          </div>
+        </section>
       </>}
 
-      {selected && <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={() => setSelected(null)}>
+      {selected && <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={(event) => { if (event.target === event.currentTarget && !editing) closeTask(); }}>
         <aside className="h-full w-full max-w-xl overflow-y-auto bg-white p-5 shadow-xl space-y-5" onClick={(e) => e.stopPropagation()} aria-label="Task details">
-          <div className="flex justify-between items-start gap-3"><h2 className="text-xl font-bold text-gray-900">Task details</h2><button className="text-gray-600" type="button" onClick={() => setSelected(null)}>Close</button></div>
+          <div className="flex justify-between items-start gap-3"><h2 className="text-xl font-bold text-gray-900">Task details</h2><button className="text-gray-600" type="button" onClick={closeTask}>Close</button></div>
           <form onSubmit={saveTask} className="space-y-3">
             <label className="block text-sm font-medium">Title<input disabled={!editing} className="input-field mt-1 w-full" value={title} onChange={(e) => setTitle(e.target.value)} required /></label>
             <label className="block text-sm font-medium">Description<textarea disabled={!editing} className="input-field mt-1 w-full" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} /></label>
             <label className="block text-sm font-medium">Priority<select disabled={!editing} className="input-field mt-1 w-full" value={priority} onChange={(e) => setPriority(e.target.value as Priority)}>{(['LOW','MEDIUM','HIGH','URGENT'] as Priority[]).map((p) => <option key={p}>{p}</option>)}</select></label>
-            {editing ? <button className="btn-primary" disabled={busy}>Save changes</button> : <button type="button" onClick={() => setEditing(true)} className="btn-primary">Edit task</button>}
+             <label className="block text-sm font-medium">Status
+               <select disabled={!editing} className="input-field mt-1 w-full" value={status} onChange={(e) => setStatus(e.target.value as Status)}>
+                 {statuses.map((item) => <option key={item} value={item}>{names[item]}</option>)}
+               </select>
+             </label>
+             <label className="block text-sm font-medium">Assignee
+               <select disabled={!editing || !!membersError} className="input-field mt-1 w-full" value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
+                 <option value="">Unassigned</option>
+                 {assigneeId && !members.some((member) => member.userId === assigneeId) && <option value={assigneeId}>Current assignee ({assigneeId})</option>}
+                 {members.map((member) => <option key={member.userId} value={member.userId}>{member.user.name} ({member.user.email})</option>)}
+               </select>
+             </label>
+             {membersError && <p role="status" className="text-xs text-amber-700">{membersError}</p>}
+             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+               <label className="block text-sm font-medium">Start date
+                 <input disabled={!editing} type="date" className="input-field mt-1 w-full" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+               </label>
+               <label className="block text-sm font-medium">Due date
+                 <input disabled={!editing} type="date" min={startDate || undefined} className="input-field mt-1 w-full" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+               </label>
+             </div>
+            {editing ? <div className="flex flex-wrap gap-2"><button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving...' : 'Save changes'}</button><button type="button" onClick={cancelEdit} disabled={busy} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Cancel</button></div> : <button type="button" onClick={() => setEditing(true)} className="btn-primary">Edit task</button>}
           </form>
           <button type="button" disabled={busy} onClick={() => void archive()} className="text-sm text-red-700 underline">Archive task</button>
           <div className="border-t pt-4 space-y-3"><h3 className="font-semibold">Labels</h3>
