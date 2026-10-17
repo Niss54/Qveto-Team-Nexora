@@ -167,6 +167,43 @@ export const organizationResponseSchema = z.object({
 });
 export type OrganizationResponse = z.infer<typeof organizationResponseSchema>;
 
+// ============================================================
+// Workspace Schemas (PRD 02)
+// ============================================================
+
+export const createWorkspaceSchema = z.object({
+  name: z.string().trim().min(1, 'Workspace name is required').max(100, 'Workspace name too long'),
+  description: z.string().trim().max(500, 'Description too long').nullable().optional(),
+}).strict();
+export type CreateWorkspaceInput = z.infer<typeof createWorkspaceSchema>;
+
+export const updateWorkspaceSchema = z.object({
+  name: z.string().trim().min(1, 'Workspace name is required').max(100, 'Workspace name too long').optional(),
+  description: z.string().trim().max(500, 'Description too long').nullable().optional(),
+}).strict().refine((data) => Object.keys(data).length > 0, {
+  message: 'At least one workspace field must be provided',
+});
+export type UpdateWorkspaceInput = z.infer<typeof updateWorkspaceSchema>;
+
+export const workspaceListQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(20),
+  includeArchived: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+});
+export type WorkspaceListQuery = z.infer<typeof workspaceListQuerySchema>;
+
+export const workspaceResponseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  description: z.string().nullable(),
+  orgId: z.string(),
+  archivedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type WorkspaceResponse = z.infer<typeof workspaceResponseSchema>;
+
 export const taskResponseSchema = z.object({
   id: z.string(),
   title: z.string(),

@@ -53,8 +53,10 @@ export class OrganizationService {
       await tx.workspace.create({
         data: {
           name: 'General',
+          slug: 'general',
           description: 'Default primary workspace',
           orgId: createdOrg.id,
+          archivedAt: null,
         },
       });
 

@@ -410,9 +410,48 @@ Removes a member from the organization. Restricted to `OWNER`.
   }
   ```
 
+### 6.4 Workspaces (PRD 02)
+
+All workspace operations require an authenticated user. Workspace access is inherited from verified organization membership; workspace IDs and client-supplied organization IDs are never authorization evidence.
+
+#### `GET /api/organizations/:orgId/workspaces`
+Lists workspaces in the verified organization. Defaults to active workspaces only and uses the standard `{ data, meta }` pagination envelope.
+- **Auth:** Required; any organization member may list active workspaces.
+- **Query:** `page` (default `1`), `pageSize` (default `20`, maximum `100`), `includeArchived` (default `false`). `includeArchived=true` is restricted to `OWNER` and `MANAGER`.
+- **Response (200 OK):** `{ "data": [Workspace], "meta": { "total": 0, "page": 1, "pageSize": 20, "totalPages": 0 } }`
+
+#### `POST /api/organizations/:orgId/workspaces`
+Creates a workspace in the verified organization.
+- **Auth:** Required (`OWNER` or `MANAGER`).
+- **Body:** `name` (required, trimmed, non-empty, maximum 100 characters), `description` (optional, nullable, maximum 500 characters). Slugs are server-generated and cannot be supplied by clients.
+- Names are unique per organization after trimming and case-insensitive comparison. Names and slugs remain reserved while archived. Slugs are normalized from the initial name and remain stable if the workspace is renamed. Generated collisions receive deterministic numeric suffixes.
+- **Response (201 Created):** `{ "workspace": Workspace }`
+
+#### `GET /api/workspaces/:workspaceId`
+Retrieves one active workspace. Archived workspace details are visible only to `OWNER` and `MANAGER`.
+- **Auth:** Required; membership in the workspace's organization is verified server-side.
+- **Response (200 OK):** `{ "workspace": Workspace }`
+
+#### `PATCH /api/workspaces/:workspaceId`
+Updates a workspace name and/or description. An empty body is invalid; slug and organization are immutable through this endpoint.
+- **Auth:** Required (`OWNER` or `MANAGER` in the workspace's organization).
+- **Response (200 OK):** `{ "workspace": Workspace }`
+
+#### `POST /api/workspaces/:workspaceId/archive`
+Soft-archives a workspace by setting `archivedAt` to the server timestamp. Teams, projects, and history are preserved. Archived workspaces cannot receive new teams or projects.
+- **Auth:** Required (`OWNER` or `MANAGER` in the workspace's organization).
+- **Response (200 OK):** `{ "workspace": Workspace }`
+
+#### `POST /api/workspaces/:workspaceId/restore`
+Restores an archived workspace without changing its slug. A uniqueness conflict returns `409 CONFLICT`; the server never silently renames or overwrites a workspace.
+- **Auth:** Required (`OWNER` or `MANAGER` in the workspace's organization).
+- **Response (200 OK):** `{ "workspace": Workspace }`
+
+`Workspace` contains `id`, `name`, `slug`, nullable `description`, `orgId`, nullable `archivedAt`, `createdAt`, and `updatedAt`. Invalid request data returns `400 VALIDATION_ERROR`; missing resources return `404 NOT_FOUND`; cross-organization access or insufficient role returns `403 FORBIDDEN`; duplicate names/slugs return `409 CONFLICT`.
+
 ---
 
-### 6.4 Tasks & Lifecycle Management (PRD 03 Contract)
+### 6.5 Tasks & Lifecycle Management (PRD 03 Contract)
 
 > **Notice for Developers:** This section defines the agreed contract for the PRD 03 Task module. The Prisma models, safe migration, shared Zod schemas (`@qveto/shared`), and Activity Event contracts are active in the foundation. Route handlers are reserved for PRD 03 implementation.
 

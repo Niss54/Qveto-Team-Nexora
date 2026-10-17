@@ -140,6 +140,7 @@ async function main() {
     wsEngineering = await prisma.workspace.create({
       data: {
         name: 'Engineering',
+        slug: 'engineering',
         description: 'Core software engineering and infrastructure',
         orgId: nexoraOrg.id,
       },
@@ -153,6 +154,7 @@ async function main() {
     wsProduct = await prisma.workspace.create({
       data: {
         name: 'Product & Design',
+        slug: 'product-design',
         description: 'Roadmaps, design systems, and user research',
         orgId: nexoraOrg.id,
       },
@@ -537,6 +539,7 @@ async function main() {
     wsRival = await prisma.workspace.create({
       data: {
         name: 'Operations',
+        slug: 'operations',
         description: 'Business operations and market research',
         orgId: rivalOrg.id,
       },
