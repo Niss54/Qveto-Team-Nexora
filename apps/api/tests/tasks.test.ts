@@ -269,6 +269,66 @@ describe('PRD 03 Task APIs', () => {
       expect(mocks.taskFindMany).not.toHaveBeenCalled();
     });
 
+    it('filters by status, priority, and assignee without losing project scope', async () => {
+      const response = await supertest(app)
+        .get(`${basePath}?status=IN_PROGRESS&priority=HIGH&assigneeId=user-a`)
+        .set('Authorization', 'Bearer session-a');
+      expect(response.status).toBe(200);
+      expect(mocks.taskFindMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({
+          projectId: PROJECT_A, archivedAt: null,
+          status: 'IN_PROGRESS', priority: 'HIGH', assigneeId: USER_A,
+        }),
+      }));
+    });
+
+    it('filters tasks by assigned label', async () => {
+      const response = await supertest(app)
+        .get(`${basePath}?labelId=label-1`)
+        .set('Authorization', 'Bearer session-a');
+      expect(response.status).toBe(200);
+      expect(mocks.taskCount).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ labels: { some: { labelId: 'label-1' } } }),
+      }));
+    });
+
+    it('filters calendar due dates with an inclusive upper day', async () => {
+      const response = await supertest(app)
+        .get(`${basePath}?dueAfter=2026-10-01&dueBefore=2026-10-31`)
+        .set('Authorization', 'Bearer session-a');
+      expect(response.status).toBe(200);
+      expect(mocks.taskFindMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ dueDate: {
+          gte: new Date('2026-10-01T00:00:00.000Z'),
+          lt: new Date('2026-11-01T00:00:00.000Z'),
+        } }),
+      }));
+    });
+
+    it('filters overdue open tasks', async () => {
+      const response = await supertest(app)
+        .get(`${basePath}?overdue=true`)
+        .set('Authorization', 'Bearer session-a');
+      expect(response.status).toBe(200);
+      expect(mocks.taskFindMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({
+          status: { not: 'DONE' },
+          dueDate: { lt: expect.any(Date) },
+        }),
+      }));
+    });
+
+    it('rejects invalid filter values and dates', async () => {
+      for (const query of [
+        'status=INVALID', 'priority=INVALID', 'dueAfter=2026-02-30',
+        'dueAfter=2026-11-01&dueBefore=2026-10-01', 'overdue=yes',
+      ]) {
+        const response = await supertest(app).get(`${basePath}?${query}`)
+          .set('Authorization', 'Bearer session-a');
+        expect(response.status).toBe(400);
+      }
+    });
+
     it('excludes archived tasks from the query', async () => {
       const response = await supertest(app)
         .get(basePath)

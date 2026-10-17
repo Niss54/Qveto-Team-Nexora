@@ -32,6 +32,7 @@ function isoDate(value: string): string | null {
   return value ? `${value}T00:00:00.000Z` : null;
 }
 type Board = { columns: Record<Status, Task[]>; total: number };
+type TaskList = { data: Task[]; meta: { total: number; page: number; pageSize: number; totalPages: number } };
 
 const statuses: Status[] = ['TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE'];
 const names: Record<Status, string> = {
@@ -78,6 +79,24 @@ export default function TasksPage() {
   const [subtasks, setSubtasks] = useState<Task[]>([]);
   const [subtaskTitle, setSubtaskTitle] = useState('');
   const [draggedId, setDraggedId] = useState<string | null>(null);
+  // Task-list filters are server-side and do not change Kanban drag-and-drop positions.
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterPriority, setFilterPriority] = useState('');
+  const [filterAssignee, setFilterAssignee] = useState('');
+  const [filterLabel, setFilterLabel] = useState('');
+  const [filterDueAfter, setFilterDueAfter] = useState('');
+  const [filterDueBefore, setFilterDueBefore] = useState('');
+  const [filterOverdue, setFilterOverdue] = useState(false);
+  const [filterPage, setFilterPage] = useState(1);
+  const [filterPageSize, setFilterPageSize] = useState(10);
+  const [filteredTasks, setFilteredTasks] = useState<TaskList>({
+    data: [], meta: { total: 0, page: 1, pageSize: 10, totalPages: 0 },
+  });
+  const [filterLoading, setFilterLoading] = useState(false);
+  const [filterError, setFilterError] = useState('');
+  const [filterLabels, setFilterLabels] = useState<Label[]>([]);
+  const [filterMembers, setFilterMembers] = useState<OrgMember[]>([]);
+
 
   useEffect(() => {
     if (!authLoading && !user) router.replace('/login');
@@ -108,6 +127,65 @@ export default function TasksPage() {
   }, [projectId, currentOrg]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // Fetch choices independently of the task-details dialog.
+  useEffect(() => {
+    let active = true;
+    setFilterLabels([]);
+    if (!projectId || !currentOrg) return;
+    void api.get<{ data: Label[] }>(`/api/projects/${encodeURIComponent(projectId)}/labels`)
+      .then((result) => { if (active) setFilterLabels(result.data); })
+      .catch(() => { if (active) setFilterLabels([]); });
+    return () => { active = false; };
+  }, [projectId, currentOrg]);
+
+  useEffect(() => {
+    let active = true;
+    setFilterMembers([]);
+    if (!currentOrg?.id) return;
+    void api.get<{ data?: OrgMember[]; members?: OrgMember[] }>(`/api/organizations/${encodeURIComponent(currentOrg.id)}/members`)
+      .then((result) => {
+        if (active) setFilterMembers(Array.isArray(result.data) ? result.data : Array.isArray(result.members) ? result.members : []);
+      })
+      .catch(() => { if (active) setFilterMembers([]); });
+    return () => { active = false; };
+  }, [currentOrg?.id]);
+
+  // The API performs filtering *before* pagination, preserving accurate result totals.
+  // Board refreshes (after edits, moves, or new tasks) also refresh the filtered list.
+  useEffect(() => {
+    let active = true;
+    if (!projectId || !currentOrg) {
+      setFilteredTasks({ data: [], meta: { total: 0, page: 1, pageSize: filterPageSize, totalPages: 0 } });
+      return;
+    }
+    if (filterDueAfter && filterDueBefore && filterDueAfter > filterDueBefore) {
+      setFilterError('Due date from must be before or equal to due date through.');
+      return;
+    }
+    const params = new URLSearchParams({ page: String(filterPage), pageSize: String(filterPageSize) });
+    if (filterStatus) params.set('status', filterStatus);
+    if (filterPriority) params.set('priority', filterPriority);
+    if (filterAssignee) params.set('assigneeId', filterAssignee);
+    if (filterLabel) params.set('labelId', filterLabel);
+    if (filterDueAfter) params.set('dueAfter', filterDueAfter);
+    if (filterDueBefore) params.set('dueBefore', filterDueBefore);
+    if (filterOverdue) params.set('overdue', 'true');
+    setFilterLoading(true);
+    setFilterError('');
+    void api.get<TaskList>(`/api/projects/${encodeURIComponent(projectId)}/tasks?${params.toString()}`)
+      .then((result) => { if (active) setFilteredTasks(result); })
+      .catch((err: unknown) => { if (active) setFilterError(message(err)); })
+      .finally(() => { if (active) setFilterLoading(false); });
+    return () => { active = false; };
+  }, [projectId, currentOrg, board, filterStatus, filterPriority, filterAssignee, filterLabel,
+    filterDueAfter, filterDueBefore, filterOverdue, filterPage, filterPageSize]);
+
+  const clearFilters = () => {
+    setFilterStatus(''); setFilterPriority(''); setFilterAssignee(''); setFilterLabel('');
+    setFilterDueAfter(''); setFilterDueBefore(''); setFilterOverdue(false); setFilterPage(1);
+  };
+
 
 
   const chooseProject = (event: FormEvent<HTMLFormElement>) => {
@@ -346,6 +424,72 @@ export default function TasksPage() {
           </div>)}
         </section>
         {loading && <p role="status" className="text-sm text-gray-500">Loading board...</p>}
+
+        <section aria-label="Filtered tasks" className="card space-y-4 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Filter tasks</h2>
+              <p className="text-sm text-gray-500">Server-side filtering and pagination. The Kanban board above remains unfiltered.</p>
+            </div>
+            <button type="button" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" onClick={clearFilters}>Clear filters</button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="text-sm font-medium">Filter status
+              <select aria-label="Filter status" className="input-field mt-1 w-full" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setFilterPage(1); }}>
+                <option value="">All statuses</option>{statuses.map((item) => <option key={item} value={item}>{names[item]}</option>)}
+              </select>
+            </label>
+            <label className="text-sm font-medium">Filter priority
+              <select aria-label="Filter priority" className="input-field mt-1 w-full" value={filterPriority} onChange={(e) => { setFilterPriority(e.target.value); setFilterPage(1); }}>
+                <option value="">All priorities</option>{(['LOW','MEDIUM','HIGH','URGENT'] as Priority[]).map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </label>
+            <label className="text-sm font-medium">Filter assignee
+              <select aria-label="Filter assignee" className="input-field mt-1 w-full" value={filterAssignee} onChange={(e) => { setFilterAssignee(e.target.value); setFilterPage(1); }}>
+                <option value="">All assignees</option>
+                {filterMembers.map((member) => <option key={member.userId} value={member.userId}>{member.user.name} ({member.user.email})</option>)}
+              </select>
+            </label>
+            <label className="text-sm font-medium">Filter label
+              <select aria-label="Filter label" className="input-field mt-1 w-full" value={filterLabel} onChange={(e) => { setFilterLabel(e.target.value); setFilterPage(1); }}>
+                <option value="">All labels</option>{filterLabels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}
+              </select>
+            </label>
+            <label className="text-sm font-medium">Due date from
+              <input aria-label="Due date from" className="input-field mt-1 w-full" type="date" value={filterDueAfter} onChange={(e) => { setFilterDueAfter(e.target.value); setFilterPage(1); }} />
+            </label>
+            <label className="text-sm font-medium">Due date through
+              <input aria-label="Due date through" className="input-field mt-1 w-full" type="date" value={filterDueBefore} onChange={(e) => { setFilterDueBefore(e.target.value); setFilterPage(1); }} />
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input aria-label="Overdue tasks only" type="checkbox" checked={filterOverdue} onChange={(e) => { setFilterOverdue(e.target.checked); setFilterPage(1); }} />
+              Overdue tasks only
+            </label>
+            <label className="text-sm font-medium">Results per page
+              <select aria-label="Results per page" className="input-field mt-1 w-full" value={filterPageSize} onChange={(e) => { setFilterPageSize(Number(e.target.value)); setFilterPage(1); }}>
+                {[5,10,20,50].map((count) => <option key={count} value={count}>{count}</option>)}
+              </select>
+            </label>
+          </div>
+          {filterError && <p role="alert" className="text-sm text-red-700">{filterError}</p>}
+          {filterLoading ? <p role="status" className="text-sm text-gray-500">Loading filtered tasks...</p> : (
+            <div className="space-y-2">
+              <p className="text-sm text-gray-600">{filteredTasks.meta.total} matching tasks · Page {filteredTasks.meta.page} of {Math.max(1, filteredTasks.meta.totalPages)}</p>
+              {filteredTasks.data.map((task) => (
+                <div key={task.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 p-3">
+                  <button type="button" className="text-left text-sm font-semibold text-indigo-700 hover:underline" onClick={() => void openTask(task)}>{task.title}</button>
+                  <span className="text-xs text-gray-600">{names[task.status]} · {task.priority}{task.dueDate ? ` · Due ${dateValue(task.dueDate)}` : ''}</span>
+                </div>
+              ))}
+              {filteredTasks.data.length === 0 && !filterError && <p className="text-sm text-gray-500">No tasks match these filters.</p>}
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-3">
+            <button type="button" className="rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-40" disabled={filterLoading || filterPage <= 1} onClick={() => setFilterPage((page) => Math.max(1, page - 1))}>Previous</button>
+            <span className="text-sm text-gray-600">Page {filterPage}</span>
+            <button type="button" className="rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-40" disabled={filterLoading || filterPage >= filteredTasks.meta.totalPages} onClick={() => setFilterPage((page) => page + 1)}>Next</button>
+          </div>
+        </section>
       </>}
 
       {selected && <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={(event) => { if (event.target === event.currentTarget && !editing) closeTask(); }}>
