@@ -2,6 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import { taskRouter } from './routes/tasks.js';
+import { taskByIdRouter } from './routes/task-by-id.js';
+import { kanbanRouter } from './routes/kanban.js';
+import { projectLabelsRouter, taskLabelsRouter } from './routes/labels.js';
 import {
   requestIdMiddleware,
   loggerMiddleware,
@@ -47,6 +51,11 @@ export function createApp(corsOrigin: string = 'http://localhost:3000'): express
   app.use('/api/organizations', organizationRouter);
   app.use('/api', workspaceRouter);
   app.use('/api', teamRouter);
+  app.use('/api/projects/:projectId/tasks', taskRouter);
+  app.use('/api/projects/:projectId/labels', projectLabelsRouter);
+  app.use('/api/tasks/:taskId/labels', taskLabelsRouter);
+  app.use('/api/projects/:projectId/kanban', kanbanRouter);
+  app.use('/api/tasks/:taskId', taskByIdRouter);
 
   // 404 handler
   app.use(notFoundHandler);
