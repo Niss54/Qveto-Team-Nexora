@@ -1,4 +1,3 @@
-
 import {
   Router,
   type Request,
@@ -6,7 +5,10 @@ import {
   type NextFunction,
 } from 'express';
 
-import { updateTaskSchema } from '@qveto/shared';
+import {
+  createTaskSchema,
+  updateTaskSchema,
+} from '@qveto/shared';
 import { requireAuth } from '../middleware/auth.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import { taskService } from '../services/task.service.js';
@@ -17,20 +19,56 @@ const taskByIdRouter: ReturnType<typeof Router> = Router({
 
 taskByIdRouter.use(requireAuth);
 
-// Extract route parameter safely
 function getTaskId(req: Request): string {
   const value = req.params.taskId;
-
-  return Array.isArray(value)
-    ? value[0]
-    : value;
+  return Array.isArray(value) ? value[0] : value;
 }
 
-/**
- * GET /api/tasks/:taskId
- *
- * Retrieve task details.
- */
+// POST /api/tasks/:taskId/subtasks
+taskByIdRouter.post(
+  '/subtasks',
+  async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const input = createTaskSchema.parse(req.body);
+      const task = await taskService.createSubtask(
+        getTaskId(req),
+        authReq.user.id,
+        input,
+      );
+      res.status(201).json({ task });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+// GET /api/tasks/:taskId/subtasks
+taskByIdRouter.get(
+  '/subtasks',
+  async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const result = await taskService.listSubtasks(
+        getTaskId(req),
+        authReq.user.id,
+      );
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+// GET /api/tasks/:taskId
 taskByIdRouter.get(
   '/',
   async (
@@ -40,12 +78,10 @@ taskByIdRouter.get(
   ): Promise<void> => {
     try {
       const authReq = req as AuthenticatedRequest;
-
       const task = await taskService.getTaskById(
         getTaskId(req),
         authReq.user.id,
       );
-
       res.status(200).json({ task });
     } catch (error) {
       next(error);
@@ -53,11 +89,7 @@ taskByIdRouter.get(
   },
 );
 
-/**
- * PATCH /api/tasks/:taskId
- *
- * Update task fields and lifecycle.
- */
+// PATCH /api/tasks/:taskId
 taskByIdRouter.patch(
   '/',
   async (
@@ -67,15 +99,12 @@ taskByIdRouter.patch(
   ): Promise<void> => {
     try {
       const authReq = req as AuthenticatedRequest;
-
       const input = updateTaskSchema.parse(req.body);
-
       const task = await taskService.updateTask(
         getTaskId(req),
         authReq.user.id,
         input,
       );
-
       res.status(200).json({ task });
     } catch (error) {
       next(error);
@@ -83,11 +112,7 @@ taskByIdRouter.patch(
   },
 );
 
-/**
- * POST /api/tasks/:taskId/archive
- *
- * Soft archive an active task.
- */
+// POST /api/tasks/:taskId/archive
 taskByIdRouter.post(
   '/archive',
   async (
@@ -97,12 +122,10 @@ taskByIdRouter.post(
   ): Promise<void> => {
     try {
       const authReq = req as AuthenticatedRequest;
-
       const task = await taskService.archiveTask(
         getTaskId(req),
         authReq.user.id,
       );
-
       res.status(200).json({ task });
     } catch (error) {
       next(error);

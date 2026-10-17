@@ -594,6 +594,89 @@ export class TaskService {
       return serializeTask(archivedTask);
     });
   }
+
+  /**
+   * POST /api/tasks/:taskId/subtasks
+   * Create a direct child of an active parent task.
+   */
+  async createSubtask(
+    parentTaskId: string,
+    userId: string,
+    input: CreateTaskInput,
+  ) {
+    const parent = await prisma.task.findUnique({
+      where: { id: parentTaskId },
+      select: {
+        id: true,
+        projectId: true,
+        archivedAt: true,
+      },
+    });
+
+    if (!parent || parent.archivedAt) {
+      throw new AppError(404, 'NOT_FOUND', 'Parent task not found');
+    }
+
+    await this.verifyProjectAccess(parent.projectId, userId);
+
+    if (
+      input.parentTaskId !== undefined &&
+      input.parentTaskId !== null &&
+      input.parentTaskId !== parentTaskId
+    ) {
+      throw new AppError(
+        400,
+        'VALIDATION_ERROR',
+        'Parent task ID does not match the URL',
+      );
+    }
+
+    // createTask also validates assignees, project access, and
+    // that the parent belongs to this project and is not archived.
+    return this.createTask(parent.projectId, userId, {
+      ...input,
+      parentTaskId,
+    });
+  }
+
+  /**
+   * GET /api/tasks/:taskId/subtasks
+   * List direct, non-archived child tasks.
+   */
+  async listSubtasks(parentTaskId: string, userId: string) {
+    const parent = await prisma.task.findUnique({
+      where: { id: parentTaskId },
+      select: {
+        id: true,
+        projectId: true,
+        archivedAt: true,
+      },
+    });
+
+    if (!parent || parent.archivedAt) {
+      throw new AppError(404, 'NOT_FOUND', 'Parent task not found');
+    }
+
+    await this.verifyProjectAccess(parent.projectId, userId);
+
+    const subtasks = await prisma.task.findMany({
+      where: {
+        parentTaskId,
+        projectId: parent.projectId,
+        archivedAt: null,
+      },
+      orderBy: [
+        { position: 'asc' },
+        { createdAt: 'desc' },
+      ],
+      select: taskSelect,
+    });
+
+    return {
+      data: subtasks.map((task) => serializeTask(task)),
+    };
+  }
+
 }
 
 export const taskService = new TaskService();
