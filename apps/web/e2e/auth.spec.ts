@@ -7,12 +7,12 @@ test.describe('Qveto Web Application - Base UI & Auth Flows', () => {
     await expect(page).toHaveTitle(/Qveto/i);
     await expect(page.locator('h1')).toContainText('Modern project management');
     await expect(page.getByRole('link', { name: /Get Started Free/i })).toBeVisible();
-    await expect(page.getByRole('link', { name: /Sign In/i })).toBeVisible();
+    await expect(page.getByRole('main').getByRole('link', { name: 'Sign In', exact: true })).toBeVisible();
   });
 
   test('Navigate from landing page to Sign In page', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('link', { name: /Sign In/i }).click();
+    await page.getByRole('main').getByRole('link', { name: 'Sign In', exact: true }).click();
 
     await expect(page).toHaveURL(/.*login/);
     await expect(page.locator('h2')).toContainText('Sign in to your account');
