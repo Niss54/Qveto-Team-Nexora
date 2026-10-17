@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { taskRouter } from './routes/tasks.js';
 import { taskByIdRouter } from './routes/task-by-id.js';
+import { kanbanRouter } from './routes/kanban.js';
 import { projectLabelsRouter, taskLabelsRouter } from './routes/labels.js';
 import {
   requestIdMiddleware,
@@ -36,6 +37,7 @@ export function createApp(corsOrigin: string = 'http://localhost:3000'): express
   app.use('/api/tasks/:taskId', taskByIdRouter);
   app.use('/api/projects/:projectId/labels', projectLabelsRouter);
   app.use('/api/tasks/:taskId/labels', taskLabelsRouter);
+  app.use('/api/projects/:projectId/kanban', kanbanRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
