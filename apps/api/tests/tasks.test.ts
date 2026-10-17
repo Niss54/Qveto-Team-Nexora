@@ -1,4 +1,3 @@
-
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import supertest from 'supertest';
 
@@ -8,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   orgMemberFindUnique: vi.fn(),
   projectMemberFindUnique: vi.fn(),
   taskFindFirst: vi.fn(),
+  taskFindUnique: vi.fn(),
+  taskFindUniqueOrThrow: vi.fn(),
+  taskUpdateMany: vi.fn(),
   taskFindMany: vi.fn(),
   taskCount: vi.fn(),
   taskCreate: vi.fn(),
@@ -32,6 +34,9 @@ vi.mock('../src/lib/prisma.js', () => ({
     },
     task: {
       findFirst: mocks.taskFindFirst,
+      findUnique: mocks.taskFindUnique,
+      findUniqueOrThrow: mocks.taskFindUniqueOrThrow,
+      updateMany: mocks.taskUpdateMany,
       findMany: mocks.taskFindMany,
       count: mocks.taskCount,
     },
@@ -168,6 +173,9 @@ beforeEach(() => {
   mocks.taskFindMany.mockResolvedValue([makeTask()]);
   mocks.taskCount.mockResolvedValue(1);
   mocks.taskFindFirst.mockResolvedValue(makeTask());
+  mocks.taskFindUnique.mockResolvedValue(makeTask());
+  mocks.taskFindUniqueOrThrow.mockResolvedValue(makeTask());
+  mocks.taskUpdateMany.mockResolvedValue({ count: 1 });
 
   mocks.taskCreate.mockImplementation(
     async ({ data }: { data: Record<string, unknown> }) =>
@@ -182,7 +190,11 @@ beforeEach(() => {
   mocks.transaction.mockImplementation(
     async (callback: (tx: unknown) => Promise<unknown>) =>
       callback({
-        task: { create: mocks.taskCreate },
+        task: {
+          create: mocks.taskCreate,
+          findUniqueOrThrow: mocks.taskFindUniqueOrThrow,
+          updateMany: mocks.taskUpdateMany,
+        },
         activityEvent: { create: mocks.eventCreate },
       }),
   );
@@ -412,6 +424,264 @@ describe('PRD 03 Task APIs', () => {
         .set('Authorization', 'Bearer session-a');
 
       expect(response.status).toBe(403);
+    });
+  });
+});
+
+
+describe('PRD 03 Task Details, Updates and Archive', () => {
+  const taskPath = '/api/tasks/task-1';
+  const authorized = 'Bearer session-a';
+
+  describe('Task details', () => {
+    it('returns a serialized task for its project member', async () => {
+      const response = await supertest(app)
+        .get(taskPath)
+        .set('Authorization', authorized);
+
+      expect(response.status).toBe(200);
+      expect(response.body.task).toMatchObject({
+        id: 'task-1',
+        projectId: PROJECT_A,
+        createdAt: date.toISOString(),
+      });
+    });
+
+    it('requires authentication', async () => {
+      const response = await supertest(app).get(taskPath);
+      expect(response.status).toBe(401);
+      expect(mocks.taskFindUnique).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 for unknown or archived tasks', async () => {
+      mocks.taskFindUnique.mockResolvedValueOnce(null);
+      const missing = await supertest(app)
+        .get(taskPath).set('Authorization', authorized);
+      expect(missing.status).toBe(404);
+
+      mocks.taskFindUnique.mockResolvedValueOnce(makeTask({ archivedAt: date }));
+      const archived = await supertest(app)
+        .get(taskPath).set('Authorization', authorized);
+      expect(archived.status).toBe(404);
+    });
+
+    it('denies cross-tenant task access', async () => {
+      const response = await supertest(app)
+        .get(taskPath)
+        .set('Authorization', 'Bearer session-b');
+      expect(response.status).toBe(403);
+    });
+  });
+
+  describe('Task updates and lifecycle', () => {
+    it('updates the title and records TASK_UPDATED', async () => {
+      mocks.taskFindUniqueOrThrow.mockResolvedValueOnce(
+        makeTask({ title: 'Renamed Task' }),
+      );
+      const response = await supertest(app)
+        .patch(taskPath)
+        .set('Authorization', authorized)
+        .send({ title: '  Renamed Task  ' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.task.title).toBe('Renamed Task');
+      expect(mocks.taskUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'task-1',
+            archivedAt: null,
+            updatedAt: date,
+          }),
+          data: expect.objectContaining({ title: 'Renamed Task' }),
+        }),
+      );
+      expect(mocks.eventCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({ type: 'TASK_UPDATED', actorId: USER_A }),
+      });
+    });
+
+    it('completes a TODO task and writes lifecycle events', async () => {
+      mocks.taskFindUniqueOrThrow.mockResolvedValueOnce(
+        makeTask({ status: 'DONE', completedAt: new Date() }),
+      );
+      const response = await supertest(app)
+        .patch(taskPath).set('Authorization', authorized)
+        .send({ status: 'DONE' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.task.status).toBe('DONE');
+      expect(response.body.task.completedAt).toBeTruthy();
+      expect(mocks.taskUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'DONE',
+            completedAt: expect.any(Date),
+          }),
+        }),
+      );
+      for (const type of ['TASK_STATUS_CHANGED', 'TASK_COMPLETED']) {
+        expect(mocks.eventCreate).toHaveBeenCalledWith({
+          data: expect.objectContaining({ type }),
+        });
+      }
+    });
+
+    it('reopens DONE and clears its completion date', async () => {
+      mocks.taskFindUnique.mockResolvedValueOnce(
+        makeTask({ status: 'DONE', completedAt: date }),
+      );
+      mocks.taskFindUniqueOrThrow.mockResolvedValueOnce(
+        makeTask({ status: 'IN_PROGRESS', completedAt: null }),
+      );
+      const response = await supertest(app)
+        .patch(taskPath).set('Authorization', authorized)
+        .send({ status: 'IN_PROGRESS' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.task.completedAt).toBeNull();
+      expect(mocks.taskUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'IN_PROGRESS', completedAt: null,
+          }),
+        }),
+      );
+      expect(mocks.eventCreate).not.toHaveBeenCalledWith({
+        data: expect.objectContaining({ type: 'TASK_COMPLETED' }),
+      });
+    });
+
+    it('rejects empty updates', async () => {
+      const response = await supertest(app)
+        .patch(taskPath).set('Authorization', authorized).send({});
+      expect(response.status).toBe(400);
+      expect(mocks.taskUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects dates invalid relative to existing values', async () => {
+      mocks.taskFindUnique.mockResolvedValueOnce(
+        makeTask({ startDate: new Date('2026-11-20T00:00:00.000Z') }),
+      );
+      const response = await supertest(app)
+        .patch(taskPath).set('Authorization', authorized)
+        .send({ dueDate: '2026-11-18T00:00:00.000Z' });
+      expect(response.status).toBe(400);
+      expect(mocks.taskUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects assigning someone outside the project', async () => {
+      const response = await supertest(app)
+        .patch(taskPath).set('Authorization', authorized)
+        .send({ assigneeId: USER_B });
+      expect(response.status).toBe(400);
+      expect(mocks.taskUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('records changes to assignee and due date', async () => {
+      mocks.taskFindUniqueOrThrow.mockResolvedValueOnce(makeTask({
+        assigneeId: USER_A,
+        dueDate: new Date('2026-12-01T00:00:00.000Z'),
+      }));
+      const response = await supertest(app)
+        .patch(taskPath).set('Authorization', authorized)
+        .send({ assigneeId: USER_A, dueDate: '2026-12-01T00:00:00.000Z' });
+      expect(response.status).toBe(200);
+      for (const type of ['TASK_ASSIGNED', 'TASK_DUE_DATE_CHANGED']) {
+        expect(mocks.eventCreate).toHaveBeenCalledWith({
+          data: expect.objectContaining({ type }),
+        });
+      }
+    });
+
+    it('denies unauthenticated and cross-tenant updates', async () => {
+      const anonymous = await supertest(app)
+        .patch(taskPath).send({ title: 'Unauthorized' });
+      expect(anonymous.status).toBe(401);
+
+      const crossTenant = await supertest(app)
+        .patch(taskPath)
+        .set('Authorization', 'Bearer session-b')
+        .send({ title: 'Unauthorized' });
+      expect(crossTenant.status).toBe(403);
+      expect(mocks.taskUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects updates to archived tasks', async () => {
+      mocks.taskFindUnique.mockResolvedValueOnce(makeTask({ archivedAt: date }));
+      const response = await supertest(app)
+        .patch(taskPath).set('Authorization', authorized)
+        .send({ title: 'No longer active' });
+      expect(response.status).toBe(404);
+      expect(mocks.taskUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('returns 409 if a concurrent change prevents the update', async () => {
+      mocks.taskUpdateMany.mockResolvedValueOnce({ count: 0 });
+      const response = await supertest(app)
+        .patch(taskPath).set('Authorization', authorized)
+        .send({ title: 'Conflicting change' });
+      expect(response.status).toBe(409);
+      expect(mocks.eventCreate).not.toHaveBeenCalled();
+    });
+
+    it('rejects reparenting until cycle checking is implemented', async () => {
+      const response = await supertest(app)
+        .patch(taskPath).set('Authorization', authorized)
+        .send({ parentTaskId: 'another-task' });
+      expect(response.status).toBe(400);
+      expect(mocks.taskUpdateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Task soft archive', () => {
+    it('archives a task and records TASK_ARCHIVED', async () => {
+      mocks.taskFindUniqueOrThrow.mockResolvedValueOnce(
+        makeTask({ archivedAt: date }),
+      );
+      const response = await supertest(app)
+        .post(`${taskPath}/archive`)
+        .set('Authorization', authorized);
+      expect(response.status).toBe(200);
+      expect(response.body.task.archivedAt).toBe(date.toISOString());
+      expect(mocks.taskUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'task-1', archivedAt: null },
+          data: { archivedAt: expect.any(Date) },
+        }),
+      );
+      expect(mocks.eventCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          type: 'TASK_ARCHIVED', entityId: 'task-1', orgId: ORG_A,
+        }),
+      });
+    });
+
+    it('denies unauthenticated and cross-tenant archive requests', async () => {
+      const anonymous = await supertest(app).post(`${taskPath}/archive`);
+      expect(anonymous.status).toBe(401);
+      const otherTenant = await supertest(app)
+        .post(`${taskPath}/archive`)
+        .set('Authorization', 'Bearer session-b');
+      expect(otherTenant.status).toBe(403);
+      expect(mocks.taskUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects already archived tasks', async () => {
+      mocks.taskFindUnique.mockResolvedValueOnce(makeTask({ archivedAt: date }));
+      const response = await supertest(app)
+        .post(`${taskPath}/archive`)
+        .set('Authorization', authorized);
+      expect(response.status).toBe(404);
+      expect(mocks.taskUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('does not write an event if another request archives first', async () => {
+      mocks.taskUpdateMany.mockResolvedValueOnce({ count: 0 });
+      const response = await supertest(app)
+        .post(`${taskPath}/archive`)
+        .set('Authorization', authorized);
+      expect(response.status).toBe(404);
+      expect(mocks.eventCreate).not.toHaveBeenCalled();
     });
   });
 });
