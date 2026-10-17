@@ -17,9 +17,20 @@ type Task = {
   position: number;
   parentTaskId: string | null;
   dueDate: string | null;
+  startDate?: string | null;
+  assigneeId?: string | null;
+  updatedAt?: string;
   completedAt: string | null;
 };
 type Label = { id: string; name: string; color: string };
+type OrgMember = { userId: string; user: { id: string; name: string; email: string } };
+
+function dateValue(value: string | null | undefined): string {
+  return value ? value.slice(0, 10) : '';
+}
+function isoDate(value: string): string | null {
+  return value ? `${value}T00:00:00.000Z` : null;
+}
 type Board = { columns: Record<Status, Task[]>; total: number };
 
 const statuses: Status[] = ['TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE'];
@@ -55,6 +66,11 @@ export default function TasksPage() {
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Priority>('MEDIUM');
   const [status, setStatus] = useState<Status>('TODO');
+  const [startDate, setStartDate] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [assigneeId, setAssigneeId] = useState('');
+  const [members, setMembers] = useState<OrgMember[]>([]);
+  const [membersError, setMembersError] = useState('');
   const [editing, setEditing] = useState(false);
   const [labels, setLabels] = useState<Label[]>([]);
   const [availableLabels, setAvailableLabels] = useState<Label[]>([]);
@@ -132,41 +148,81 @@ export default function TasksPage() {
   const openTask = async (task: Task) => {
     setSelected(task); setEditing(false); setLabels([]); setSubtasks([]);
     setTitle(task.title); setDescription(task.description ?? ''); setPriority(task.priority);
-    setStatus(task.status); setError('');
+    setStatus(task.status); setStartDate(dateValue(task.startDate));
+    setDueDate(dateValue(task.dueDate)); setAssigneeId(task.assigneeId ?? '');
+    setMembers([]); setMembersError(''); setError('');
     try {
-      const [assigned, available, children] = await Promise.all([
+      const [detail, assigned, available, children] = await Promise.all([
+        api.get<{ task: Task }>(`/api/tasks/${task.id}`),
         api.get<{ data: Label[] }>(`/api/tasks/${task.id}/labels`),
         api.get<{ data: Label[] }>(`/api/projects/${encodeURIComponent(projectId)}/labels`),
         api.get<{ data: Task[] }>(`/api/tasks/${task.id}/subtasks`),
       ]);
+      const full = detail.task;
+      setSelected(full);
+      setTitle(full.title); setDescription(full.description ?? ''); setPriority(full.priority);
+      setStatus(full.status); setStartDate(dateValue(full.startDate));
+      setDueDate(dateValue(full.dueDate)); setAssigneeId(full.assigneeId ?? '');
       setLabels(assigned.data); setAvailableLabels(available.data); setSubtasks(children.data);
     } catch (err) { setError(message(err)); }
+    if (currentOrg?.id) {
+      try {
+        const result = await api.get<{ data?: OrgMember[]; members?: OrgMember[] }>(`/api/organizations/${encodeURIComponent(currentOrg.id)}/members`);
+        setMembers(Array.isArray(result.data) ? result.data : Array.isArray(result.members) ? result.members : []);
+      } catch (err) {
+        setMembersError(`Member list unavailable: ${message(err)}. Existing assignment is preserved unless changed.`);
+      }
+    }
   };
 
   const saveTask = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selected || !title.trim()) return;
+    if (startDate && dueDate && startDate > dueDate) {
+      setError('Due date must be on or after start date.');
+      return;
+    }
     setBusy(true); setError('');
     try {
-      const result = await api.patch<{ task: Task }>(`/api/tasks/${selected.id}`, {
+      const originalStatus = selected.status;
+      const patch = await api.patch<{ task: Task }>(`/api/tasks/${selected.id}`, {
         title: title.trim(), description: description.trim() || null, priority,
+        startDate: isoDate(startDate), dueDate: isoDate(dueDate),
+        assigneeId: assigneeId || null,
       });
-      setSelected(result.task);
-      setTitle(result.task.title);
-      setDescription(result.task.description ?? '');
-      setPriority(result.task.priority);
+      let saved = patch.task;
+      setSelected(saved);
+      if (status !== originalStatus) {
+        const destinationIndex = (board.columns[status] ?? []).length;
+        await api.patch(`/api/projects/${encodeURIComponent(projectId)}/kanban/move`, {
+          taskId: selected.id, status, targetIndex: destinationIndex,
+        });
+        const latest = await api.get<{ task: Task }>(`/api/tasks/${selected.id}`);
+        saved = latest.task;
+        setSelected(saved);
+      }
+      setTitle(saved.title); setDescription(saved.description ?? ''); setPriority(saved.priority);
+      setStatus(saved.status); setStartDate(dateValue(saved.startDate));
+      setDueDate(dateValue(saved.dueDate)); setAssigneeId(saved.assigneeId ?? '');
       setEditing(false);
       await refresh();
-    } catch (err) { setError(message(err)); }
-    finally { setBusy(false); }
+    } catch (err) {
+      setError(`${message(err)}. Some changes may have saved; refresh before retrying.`);
+      try {
+        const latest = await api.get<{ task: Task }>(`/api/tasks/${selected.id}`);
+        setSelected(latest.task);
+        await refresh();
+      } catch { /* Preserve the original error. */ }
+    } finally { setBusy(false); }
   };
 
   const cancelEdit = () => {
     if (!selected) return;
-    setTitle(selected.title);
-    setDescription(selected.description ?? '');
-    setPriority(selected.priority);
-    setEditing(false);
+    setTitle(selected.title); setDescription(selected.description ?? '');
+    setPriority(selected.priority); setStatus(selected.status);
+    setStartDate(dateValue(selected.startDate)); setDueDate(dateValue(selected.dueDate));
+    setAssigneeId(selected.assigneeId ?? '');
+    setEditing(false); setError('');
   };
 
   const closeTask = () => {
@@ -299,6 +355,27 @@ export default function TasksPage() {
             <label className="block text-sm font-medium">Title<input disabled={!editing} className="input-field mt-1 w-full" value={title} onChange={(e) => setTitle(e.target.value)} required /></label>
             <label className="block text-sm font-medium">Description<textarea disabled={!editing} className="input-field mt-1 w-full" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} /></label>
             <label className="block text-sm font-medium">Priority<select disabled={!editing} className="input-field mt-1 w-full" value={priority} onChange={(e) => setPriority(e.target.value as Priority)}>{(['LOW','MEDIUM','HIGH','URGENT'] as Priority[]).map((p) => <option key={p}>{p}</option>)}</select></label>
+             <label className="block text-sm font-medium">Status
+               <select disabled={!editing} className="input-field mt-1 w-full" value={status} onChange={(e) => setStatus(e.target.value as Status)}>
+                 {statuses.map((item) => <option key={item} value={item}>{names[item]}</option>)}
+               </select>
+             </label>
+             <label className="block text-sm font-medium">Assignee
+               <select disabled={!editing || !!membersError} className="input-field mt-1 w-full" value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
+                 <option value="">Unassigned</option>
+                 {assigneeId && !members.some((member) => member.userId === assigneeId) && <option value={assigneeId}>Current assignee ({assigneeId})</option>}
+                 {members.map((member) => <option key={member.userId} value={member.userId}>{member.user.name} ({member.user.email})</option>)}
+               </select>
+             </label>
+             {membersError && <p role="status" className="text-xs text-amber-700">{membersError}</p>}
+             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+               <label className="block text-sm font-medium">Start date
+                 <input disabled={!editing} type="date" className="input-field mt-1 w-full" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+               </label>
+               <label className="block text-sm font-medium">Due date
+                 <input disabled={!editing} type="date" min={startDate || undefined} className="input-field mt-1 w-full" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+               </label>
+             </div>
             {editing ? <div className="flex flex-wrap gap-2"><button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving...' : 'Save changes'}</button><button type="button" onClick={cancelEdit} disabled={busy} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Cancel</button></div> : <button type="button" onClick={() => setEditing(true)} className="btn-primary">Edit task</button>}
           </form>
           <button type="button" disabled={busy} onClick={() => void archive()} className="text-sm text-red-700 underline">Archive task</button>
