@@ -148,13 +148,32 @@ export default function TasksPage() {
     if (!selected || !title.trim()) return;
     setBusy(true); setError('');
     try {
-      await api.patch(`/api/tasks/${selected.id}`, {
+      const result = await api.patch<{ task: Task }>(`/api/tasks/${selected.id}`, {
         title: title.trim(), description: description.trim() || null, priority,
       });
-      setEditing(false); setSelected(null);
+      setSelected(result.task);
+      setTitle(result.task.title);
+      setDescription(result.task.description ?? '');
+      setPriority(result.task.priority);
+      setEditing(false);
       await refresh();
     } catch (err) { setError(message(err)); }
     finally { setBusy(false); }
+  };
+
+  const cancelEdit = () => {
+    if (!selected) return;
+    setTitle(selected.title);
+    setDescription(selected.description ?? '');
+    setPriority(selected.priority);
+    setEditing(false);
+  };
+
+  const closeTask = () => {
+    if (busy) return;
+    if (editing && !window.confirm('Discard unsaved task changes?')) return;
+    setEditing(false);
+    setSelected(null);
   };
 
   const archive = async () => {
@@ -273,14 +292,14 @@ export default function TasksPage() {
         {loading && <p role="status" className="text-sm text-gray-500">Loading board...</p>}
       </>}
 
-      {selected && <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={() => setSelected(null)}>
+      {selected && <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={(event) => { if (event.target === event.currentTarget && !editing) closeTask(); }}>
         <aside className="h-full w-full max-w-xl overflow-y-auto bg-white p-5 shadow-xl space-y-5" onClick={(e) => e.stopPropagation()} aria-label="Task details">
-          <div className="flex justify-between items-start gap-3"><h2 className="text-xl font-bold text-gray-900">Task details</h2><button className="text-gray-600" type="button" onClick={() => setSelected(null)}>Close</button></div>
+          <div className="flex justify-between items-start gap-3"><h2 className="text-xl font-bold text-gray-900">Task details</h2><button className="text-gray-600" type="button" onClick={closeTask}>Close</button></div>
           <form onSubmit={saveTask} className="space-y-3">
             <label className="block text-sm font-medium">Title<input disabled={!editing} className="input-field mt-1 w-full" value={title} onChange={(e) => setTitle(e.target.value)} required /></label>
             <label className="block text-sm font-medium">Description<textarea disabled={!editing} className="input-field mt-1 w-full" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} /></label>
             <label className="block text-sm font-medium">Priority<select disabled={!editing} className="input-field mt-1 w-full" value={priority} onChange={(e) => setPriority(e.target.value as Priority)}>{(['LOW','MEDIUM','HIGH','URGENT'] as Priority[]).map((p) => <option key={p}>{p}</option>)}</select></label>
-            {editing ? <button className="btn-primary" disabled={busy}>Save changes</button> : <button type="button" onClick={() => setEditing(true)} className="btn-primary">Edit task</button>}
+            {editing ? <div className="flex flex-wrap gap-2"><button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving...' : 'Save changes'}</button><button type="button" onClick={cancelEdit} disabled={busy} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Cancel</button></div> : <button type="button" onClick={() => setEditing(true)} className="btn-primary">Edit task</button>}
           </form>
           <button type="button" disabled={busy} onClick={() => void archive()} className="text-sm text-red-700 underline">Archive task</button>
           <div className="border-t pt-4 space-y-3"><h3 className="font-semibold">Labels</h3>
