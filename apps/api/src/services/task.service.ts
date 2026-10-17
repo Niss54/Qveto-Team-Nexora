@@ -4,7 +4,18 @@ import type {
   UpdateTaskInput,
 } from '@qveto/shared';
 
+import type { Prisma, TaskPriority, TaskStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
+
+type TaskListFilters = {
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  assigneeId?: string;
+  labelId?: string;
+  dueBefore?: string;
+  dueAfter?: string;
+  overdue?: boolean;
+};
 import { AppError } from '../middleware/errorHandler.js';
 
 // Fields returned by Task API endpoints
@@ -243,16 +254,41 @@ export class TaskService {
     userId: string,
     page = 1,
     pageSize = 20,
+    filters: TaskListFilters = {},
   ) {
     await this.verifyProjectAccess(
       projectId,
       userId,
     );
 
-    const where = {
+    const where: Prisma.TaskWhereInput = {
       projectId,
       archivedAt: null,
     };
+
+    if (filters.status) where.status = filters.status;
+    if (filters.priority) where.priority = filters.priority;
+    if (filters.assigneeId) where.assigneeId = filters.assigneeId;
+    if (filters.labelId) where.labels = { some: { labelId: filters.labelId } };
+
+    const dueDate: Prisma.DateTimeNullableFilter = {};
+    if (filters.dueAfter) dueDate.gte = new Date(`${filters.dueAfter}T00:00:00.000Z`);
+    // Inclusive calendar-day upper boundary using exclusive next midnight.
+    if (filters.dueBefore) {
+      const upper = new Date(`${filters.dueBefore}T00:00:00.000Z`);
+      upper.setUTCDate(upper.getUTCDate() + 1);
+      dueDate.lt = upper;
+    }
+    if (filters.overdue) {
+      where.status = filters.status ?? { not: 'DONE' };
+      if (filters.status === 'DONE') {
+        // DONE tasks can never satisfy the overdue-open definition.
+        where.AND = [{ status: 'DONE' }, { status: { not: 'DONE' } }];
+      }
+      const now = new Date();
+      if (!dueDate.lt || dueDate.lt > now) dueDate.lt = now;
+    }
+    if (Object.keys(dueDate).length > 0) where.dueDate = dueDate;
 
     const [tasks, total] = await Promise.all([
       prisma.task.findMany({
