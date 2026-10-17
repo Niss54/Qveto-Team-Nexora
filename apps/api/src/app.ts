@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import { taskRouter } from './routes/tasks.js';
 import {
   requestIdMiddleware,
   loggerMiddleware,
@@ -45,6 +46,7 @@ export function createApp(corsOrigin: string = 'http://localhost:3000'): express
   app.use('/api', healthRouter);
   app.use('/api/auth', authRouter);
   app.use('/api/organizations', organizationRouter);
+  app.use('/api/projects/:projectId/tasks', taskRouter);
 
   // 404 handler
   app.use(notFoundHandler);
