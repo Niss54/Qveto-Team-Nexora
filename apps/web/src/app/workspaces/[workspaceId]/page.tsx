@@ -104,6 +104,9 @@ export default function WorkspaceDetailPage() {
             <h1 className="text-2xl font-bold text-gray-900">{workspace.name}</h1>
           </header>
           <section className="card space-y-5 p-5">
+            <div className="border-b border-gray-100 pb-4">
+              <Link href={`/workspaces/${workspace.id}/teams`} className="btn-secondary text-sm">View teams</Link>
+            </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Workspace slug</p>
               <p className="mt-1 font-mono text-sm text-gray-800">{workspace.slug}</p>

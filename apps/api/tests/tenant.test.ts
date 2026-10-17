@@ -48,11 +48,30 @@ interface MockWorkspace {
   updatedAt: Date;
 }
 
+interface MockTeam {
+  id: string;
+  name: string;
+  description: string | null;
+  workspaceId: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface MockTeamMember {
+  id: string;
+  teamId: string;
+  userId: string;
+  role: string;
+  joinedAt: Date;
+}
+
 const mockUsers: MockUser[] = [];
 const mockSessions: MockSession[] = [];
 const mockOrgs: MockOrg[] = [];
 const mockMembers: MockOrgMember[] = [];
 const mockWorkspaces: MockWorkspace[] = [];
+const mockTeams: MockTeam[] = [];
+const mockTeamMembers: MockTeamMember[] = [];
 
 // Mock prisma client with transactional support and relations
 vi.mock('../src/lib/prisma.js', () => {
@@ -277,12 +296,69 @@ vi.mock('../src/lib/prisma.js', () => {
     }),
   };
 
+  const teamMethods = {
+    findMany: vi.fn(async ({ where }: { where: { workspaceId: string; members?: { some: { userId: string } } } }) => {
+      return mockTeams
+        .filter((team) => team.workspaceId === where.workspaceId)
+        .filter((team) => !where.members || mockTeamMembers.some((member) => member.teamId === team.id && member.userId === where.members!.some.userId))
+        .map((team) => ({
+          ...team,
+          members: mockTeamMembers.filter((member) => member.teamId === team.id).map((member) => {
+            const user = mockUsers.find((item) => item.id === member.userId)!;
+            return { ...member, user: { id: user.id, name: user.name, email: user.email } };
+          }),
+        }));
+    }),
+    findUnique: vi.fn(async ({ where, include }: { where: { id: string }; include?: { workspace?: unknown; members?: { where?: { userId?: string } } } }) => {
+      const team = mockTeams.find((item) => item.id === where.id);
+      if (!team) return null;
+      const workspace = mockWorkspaces.find((item) => item.id === team.workspaceId);
+      const members = mockTeamMembers.filter((member) => member.teamId === team.id && (!include?.members?.where?.userId || member.userId === include.members.where.userId));
+      if (include?.workspace) return { ...team, workspace, members };
+      return { ...team, members: members.map((member) => {
+        const user = mockUsers.find((item) => item.id === member.userId)!;
+        return { ...member, user: { id: user.id, name: user.name, email: user.email } };
+      }) };
+    }),
+    create: vi.fn(async ({ data }: { data: { name: string; description: string | null; workspaceId: string } }) => {
+      const team = { id: `team_${Date.now()}`, ...data, createdAt: new Date(), updatedAt: new Date() };
+      mockTeams.push(team);
+      return { ...team, members: [] };
+    }),
+    update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<MockTeam> }) => {
+      const team = mockTeams.find((item) => item.id === where.id);
+      if (!team) throw new Error('Team not found');
+      Object.assign(team, data, { updatedAt: new Date() });
+      return { ...team, members: mockTeamMembers.filter((member) => member.teamId === team.id).map((member) => {
+        const user = mockUsers.find((item) => item.id === member.userId)!;
+        return { ...member, user: { id: user.id, name: user.name, email: user.email } };
+      }) };
+    }),
+  };
+
+  const teamMemberMethods = {
+    create: vi.fn(async ({ data }: { data: { teamId: string; userId: string } }) => {
+      if (mockTeamMembers.some((member) => member.teamId === data.teamId && member.userId === data.userId)) throw { code: 'P2002' };
+      const member = { id: `tm_${Date.now()}`, ...data, role: 'MEMBER', joinedAt: new Date() };
+      mockTeamMembers.push(member);
+      return member;
+    }),
+    deleteMany: vi.fn(async ({ where }: { where: { teamId: string; userId: string } }) => {
+      const index = mockTeamMembers.findIndex((member) => member.teamId === where.teamId && member.userId === where.userId);
+      if (index < 0) return { count: 0 };
+      mockTeamMembers.splice(index, 1);
+      return { count: 1 };
+    }),
+  };
+
   const prismaMock = {
     user: userMethods,
     session: sessionMethods,
     organization: orgMethods,
     organizationMember: memberMethods,
     workspace: workspaceMethods,
+    team: teamMethods,
+    teamMember: teamMemberMethods,
     $queryRaw: vi.fn(async (parts: TemplateStringsArray, ...values: unknown[]) => {
       const query = parts.join('?');
       if (query.includes('lower(regexp_replace')) {
@@ -329,6 +405,8 @@ describe('Authorization & Multi-Tenant Isolation System', () => {
     mockOrgs.length = 0;
     mockMembers.length = 0;
     mockWorkspaces.length = 0;
+    mockTeams.length = 0;
+    mockTeamMembers.length = 0;
 
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash('Password123!', salt);
@@ -573,6 +651,80 @@ describe('Authorization & Multi-Tenant Isolation System', () => {
       const response = await request.get(`/api/organizations/${orgAlphaId}/workspaces`);
       expect(response.status).toBe(401);
       expect(response.body.error.code).toBe('UNAUTHORIZED');
+    });
+  });
+
+  describe('Team API', () => {
+    const workspaceId = 'ws_team_alpha';
+
+    beforeEach(() => {
+      mockWorkspaces.push({
+        id: workspaceId,
+        name: 'Teams',
+        slug: 'teams',
+        description: null,
+        orgId: orgAlphaId,
+        archivedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+
+    it('lets managers create teams and manage roster members who belong to the organization', async () => {
+      const created = await request
+        .post(`/api/workspaces/${workspaceId}/teams`)
+        .set('Cookie', markCookie)
+        .send({ name: 'Platform', description: 'Platform group' });
+      expect(created.status).toBe(201);
+      const teamId = created.body.team.id as string;
+
+      const invalidMember = await request
+        .post(`/api/teams/${teamId}/members`)
+        .set('Cookie', aliceCookie)
+        .send({ userId: bobId });
+      expect(invalidMember.status).toBe(400);
+
+      const added = await request
+        .post(`/api/teams/${teamId}/members`)
+        .set('Cookie', aliceCookie)
+        .send({ userId: ericId });
+      expect(added.status).toBe(201);
+      expect(added.body.team.members[0].userId).toBe(ericId);
+
+      const employeeList = await request.get(`/api/workspaces/${workspaceId}/teams`).set('Cookie', ericCookie);
+      expect(employeeList.status).toBe(200);
+      expect(employeeList.body.teams).toHaveLength(1);
+
+      const employeeUpdate = await request
+        .patch(`/api/teams/${teamId}`)
+        .set('Cookie', ericCookie)
+        .send({ name: 'Nope' });
+      expect(employeeUpdate.status).toBe(403);
+
+      const foreignRead = await request.get(`/api/teams/${teamId}`).set('Cookie', bobCookie);
+      expect(foreignRead.status).toBe(403);
+
+      const removed = await request.delete(`/api/teams/${teamId}/members/${ericId}`).set('Cookie', markCookie);
+      expect(removed.status).toBe(200);
+      const employeeListAfterRemoval = await request.get(`/api/workspaces/${workspaceId}/teams`).set('Cookie', ericCookie);
+      expect(employeeListAfterRemoval.body.teams).toHaveLength(0);
+    });
+
+    it('rejects team creation in archived workspaces', async () => {
+      const created = await request
+        .post(`/api/workspaces/${workspaceId}/teams`)
+        .set('Cookie', aliceCookie)
+        .send({ name: 'Existing Team' });
+      expect(created.status).toBe(201);
+
+      mockWorkspaces[0].archivedAt = new Date();
+
+      const createArchived = await request
+        .post(`/api/workspaces/${workspaceId}/teams`)
+        .set('Cookie', aliceCookie)
+        .send({ name: 'Blocked Team' });
+      expect(createArchived.status).toBe(409);
+
     });
   });
 

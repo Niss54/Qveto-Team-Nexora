@@ -8,7 +8,7 @@ import {
   errorHandler,
   notFoundHandler,
 } from './middleware/index.js';
-import { healthRouter, authRouter, organizationRouter, workspaceRouter } from './routes/index.js';
+import { healthRouter, authRouter, organizationRouter, workspaceRouter, teamRouter } from './routes/index.js';
 
 /**
  * Creates and configures the Express application.
@@ -46,6 +46,7 @@ export function createApp(corsOrigin: string = 'http://localhost:3000'): express
   app.use('/api/auth', authRouter);
   app.use('/api/organizations', organizationRouter);
   app.use('/api', workspaceRouter);
+  app.use('/api', teamRouter);
 
   // 404 handler
   app.use(notFoundHandler);

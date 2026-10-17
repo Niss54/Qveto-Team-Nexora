@@ -204,6 +204,37 @@ export const workspaceResponseSchema = z.object({
 });
 export type WorkspaceResponse = z.infer<typeof workspaceResponseSchema>;
 
+export const createTeamSchema = z.object({
+  name: z.string().trim().min(1, 'Team name is required').max(100, 'Team name too long'),
+  description: z.string().trim().max(500, 'Description too long').nullable().optional(),
+}).strict();
+export type CreateTeamInput = z.infer<typeof createTeamSchema>;
+
+export const updateTeamSchema = createTeamSchema.partial().refine((data) => Object.keys(data).length > 0, {
+  message: 'At least one team field must be provided',
+});
+export type UpdateTeamInput = z.infer<typeof updateTeamSchema>;
+
+export const addTeamMemberSchema = z.object({ userId: z.string().min(1) }).strict();
+export type AddTeamMemberInput = z.infer<typeof addTeamMemberSchema>;
+
+export const teamResponseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  workspaceId: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  members: z.array(z.object({
+    id: z.string(),
+    userId: z.string(),
+    role: z.string(),
+    joinedAt: z.string(),
+    user: z.object({ id: z.string(), name: z.string(), email: z.string() }),
+  })).optional(),
+});
+export type TeamResponse = z.infer<typeof teamResponseSchema>;
+
 export const taskResponseSchema = z.object({
   id: z.string(),
   title: z.string(),
