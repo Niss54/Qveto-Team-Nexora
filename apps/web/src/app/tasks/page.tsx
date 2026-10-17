@@ -346,7 +346,13 @@ export default function TasksPage() {
     setBusy(true); setError('');
     try {
       const res = await api.post<{ label: Label }>(`/api/projects/${encodeURIComponent(projectId)}/labels`, { name: newLabel.trim() });
-      setAvailableLabels((prev) => [...prev, res.label]); setNewLabel('');
+            setAvailableLabels((prev) => [...prev, res.label]);
+      setFilterLabels((prev) =>
+        prev.some((label) => label.id === res.label.id)
+          ? prev
+          : [...prev, res.label]
+      );
+      setNewLabel('');
     } catch (err) { setError(message(err)); }
     finally { setBusy(false); }
   };
