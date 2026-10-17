@@ -13,7 +13,7 @@ export function Sidebar() {
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: '📊' },
     { name: 'Projects', href: '/projects', icon: '📁', badge: 'Soon' },
-    { name: 'Tasks & Kanban', href: '/tasks', icon: '📋', badge: 'Soon' },
+    { name: 'Tasks & Kanban', href: '/tasks', icon: '📋'},
     { name: 'Members & Roles', href: '/members', icon: '👥', badge: 'Soon' },
     { name: 'Settings', href: '/settings', icon: '⚙️', badge: 'Soon' },
   ];
