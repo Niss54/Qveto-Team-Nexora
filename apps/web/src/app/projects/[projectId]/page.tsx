@@ -100,7 +100,7 @@ export default function ProjectDetailPage() {
       const result = await api.patch<ProjectDetailResponse>(`/api/projects/${encodeURIComponent(project.id)}`, {
         name: name.trim(),
         description: description.trim() || null,
-        ownerId,
+        ...(ownerId ? { ownerId } : {}),
         status,
         startDate: dateAtUtcMidnight(startDate),
         dueDate: dateAtUtcMidnight(dueDate),
@@ -193,8 +193,8 @@ export default function ProjectDetailPage() {
             <input className="input-field w-full" value={name} onChange={(event) => setName(event.target.value)} maxLength={100} required disabled={!canManage || isArchived} />
           </label>
           <label className="space-y-1 text-sm font-medium text-gray-700">Owner
-            <select className="input-field w-full" value={ownerId} onChange={(event) => setOwnerId(event.target.value)} disabled={!canManage || isArchived} required>
-              {!ownerId && <option value="" disabled>Select an organization member</option>}
+            <select className="input-field w-full" value={ownerId} onChange={(event) => setOwnerId(event.target.value)} disabled={!canManage || isArchived} required={Boolean(project.ownerId)}>
+              {!project.ownerId && <option value="">No owner assigned (legacy project)</option>}
               {orgMembers.map((member) => <option key={member.userId} value={member.userId}>{member.user.name} ({member.user.email})</option>)}
             </select>
           </label>
@@ -212,7 +212,7 @@ export default function ProjectDetailPage() {
           <label className="space-y-1 text-sm font-medium text-gray-700">Due date
             <input className="input-field w-full" type="date" min={startDate || undefined} value={dueDate} onChange={(event) => setDueDate(event.target.value)} disabled={!canManage || isArchived} />
           </label>
-          {canManage && <div className="sm:col-span-2"><button className="btn-primary text-sm" type="submit" disabled={saving || isArchived || !ownerId}>{saving ? 'Saving…' : 'Save changes'}</button></div>}
+          {canManage && <div className="sm:col-span-2"><button className="btn-primary text-sm" type="submit" disabled={saving || isArchived}>{saving ? 'Saving…' : 'Save changes'}</button></div>}
         </form>
 
         <section className="card space-y-4 p-5">
