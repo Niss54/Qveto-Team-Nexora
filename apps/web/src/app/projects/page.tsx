@@ -69,7 +69,7 @@ export default function ProjectsPage() {
         const members = await api.get<OrgMembersResponse>(`/api/organizations/${encodeURIComponent(currentOrg.id)}/members`);
         const availableMembers = Array.isArray(members.data) ? members.data : members.members ?? [];
         setOrgMembers(availableMembers);
-        setOwnerId(availableMembers[0]?.userId ?? '');
+        setOwnerId('');
       } else {
         setOrgMembers([]);
         setOwnerId('');
