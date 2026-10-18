@@ -242,6 +242,7 @@ export type TeamResponse = z.infer<typeof teamResponseSchema>;
 /** Supported Project lifecycle values. */
 export const ProjectStatus = z.enum(['PLANNING', 'ACTIVE', 'ON_HOLD', 'COMPLETED', 'ARCHIVED']);
 export type ProjectStatus = z.infer<typeof ProjectStatus>;
+const writableProjectStatus = z.enum(['PLANNING', 'ACTIVE', 'ON_HOLD', 'COMPLETED']);
 
 const projectDateRange = <T extends z.ZodTypeAny>(schema: T) => schema.refine(
   (data: { startDate?: Date | null; dueDate?: Date | null }) =>
@@ -253,7 +254,7 @@ export const createProjectSchema = projectDateRange(z.object({
   name: z.string().trim().min(1, 'Project name is required').max(100, 'Project name too long'),
   description: z.string().trim().max(500, 'Description too long').nullable().optional(),
   ownerId: z.string().min(1, 'Project owner is required'),
-  status: ProjectStatus.default('ACTIVE'),
+  status: writableProjectStatus.default('ACTIVE'),
   startDate: z.coerce.date().nullable().optional(),
   dueDate: z.coerce.date().nullable().optional(),
 }).strict());
@@ -263,7 +264,7 @@ export const updateProjectSchema = projectDateRange(z.object({
   name: z.string().trim().min(1, 'Project name is required').max(100, 'Project name too long').optional(),
   description: z.string().trim().max(500, 'Description too long').nullable().optional(),
   ownerId: z.string().min(1, 'Project owner is required').optional(),
-  status: ProjectStatus.optional(),
+  status: writableProjectStatus.optional(),
   startDate: z.coerce.date().nullable().optional(),
   dueDate: z.coerce.date().nullable().optional(),
 }).strict()).refine((data) => Object.keys(data).length > 0, {

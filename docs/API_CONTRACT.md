@@ -496,6 +496,8 @@ Removes an existing team membership.
 
 All task operations are strictly tenant-scoped through `Project -> Workspace -> Organization`. Never trust client-provided `orgId`.
 
+When a project has `status = ARCHIVED`, organization members who are also project members may continue using the existing task, label, and Kanban read endpoints, subject to their established filters. Task creation, updates, task archiving, subtask creation, project-label creation, task-label assignment/removal, and Kanban moves return `409 CONFLICT`. Project archive/restore is an explicit Project Management operation; callers cannot restore a project by patching its status.
+
 #### `GET /api/projects/:projectId/tasks`
 Lists tasks for an active project. Normal active task queries exclude soft-archived tasks by default (`archivedAt: null`).
 - **Auth:** Required (User must belong to the organization owning the project)

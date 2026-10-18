@@ -5,6 +5,7 @@ import {
   projectListQuerySchema,
   projectResponseSchema,
   updateProjectSchema,
+  updateProjectSchema,
 } from '@qveto/shared';
 
 describe('PRD 02 Project schemas', () => {
@@ -33,12 +34,14 @@ describe('PRD 02 Project schemas', () => {
       startDate: '2026-11-01T00:00:00.000Z', dueDate: '2026-10-31T00:00:00.000Z',
     }).success).toBe(false);
     expect(createProjectSchema.safeParse({ name: 'Roadmap', ownerId: 'user-1', orgId: 'spoofed' }).success).toBe(false);
+    expect(createProjectSchema.safeParse({ name: 'Roadmap', ownerId: 'user-1', status: 'ARCHIVED' }).success).toBe(false);
   });
 
   it('requires a non-empty update and validates date ranges when both dates are supplied', () => {
     expect(updateProjectSchema.safeParse({}).success).toBe(false);
     expect(updateProjectSchema.safeParse({ startDate: '2026-11-01', dueDate: '2026-10-31' }).success).toBe(false);
     expect(updateProjectSchema.safeParse({ dueDate: null }).success).toBe(true);
+    expect(updateProjectSchema.safeParse({ status: 'ARCHIVED' }).success).toBe(false);
   });
 
   it('defaults to excluding archived projects in paginated list queries', () => {
