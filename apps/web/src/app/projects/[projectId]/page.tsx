@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -19,10 +19,6 @@ function errorMessage(error: unknown, fallback: string): string {
 function dateValue(value: string | null): string {
   return value ? value.slice(0, 10) : '';
 }
-function dateAtUtcMidnight(value: string): string | null {
-  return value ? `${value}T00:00:00.000Z` : null;
-}
-
 export default function ProjectDetailPage() {
   const params = useParams<{ projectId: string }>();
   const router = useRouter();
@@ -33,9 +29,6 @@ export default function ProjectDetailPage() {
   const [members, setMembers] = useState<ProjectMemberResponse[]>([]);
   const [orgMembers, setOrgMembers] = useState<OrgMemberResponse[]>([]);
   const [selectedMember, setSelectedMember] = useState('');
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [ownerId, setOwnerId] = useState('');
   const [status, setStatus] = useState<string>('ACTIVE');
   const [startDate, setStartDate] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -69,9 +62,6 @@ export default function ProjectDetailPage() {
       setWorkspace(workspaceResult.workspace);
       setMembers(memberResult.members);
       setOrgMembers(availableOrgMembers);
-      setName(result.project.name);
-      setDescription(result.project.description ?? '');
-      setOwnerId(result.project.ownerId ?? '');
       setStatus(result.project.status);
       setStartDate(dateValue(result.project.startDate));
       setDueDate(dateValue(result.project.dueDate));
@@ -85,35 +75,6 @@ export default function ProjectDetailPage() {
   }, [projectId, currentOrg]);
 
   useEffect(() => { void load(); }, [load]);
-
-  const updateProject = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!project || isArchived) return;
-    if (startDate && dueDate && startDate > dueDate) {
-      setError('Start date must be on or before the due date.');
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const result = await api.patch<ProjectDetailResponse>(`/api/projects/${encodeURIComponent(project.id)}`, {
-        name: name.trim(),
-        description: description.trim() || null,
-        ...(ownerId ? { ownerId } : {}),
-        ...(statuses.includes(status as ProjectStatus) ? { status: status as ProjectStatus } : {}),
-        startDate: dateAtUtcMidnight(startDate),
-        dueDate: dateAtUtcMidnight(dueDate),
-      });
-      setProject(result.project);
-      setNotice('Project updated.');
-      await load();
-    } catch (updateError) {
-      setError(errorMessage(updateError, 'Could not update project.'));
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const setArchived = async (archive: boolean) => {
     if (!project) return;
@@ -187,34 +148,31 @@ export default function ProjectDetailPage() {
       {isArchived && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">This project is archived. Existing task data remains available; changes are disabled until it is restored.</p>}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-        <form onSubmit={updateProject} className="card grid gap-4 p-5 sm:grid-cols-2">
+        <section className="card grid gap-4 p-5 sm:grid-cols-2">
           <h2 className="text-base font-semibold text-gray-900 sm:col-span-2">Project details</h2>
+          {canManage && <p className="text-sm text-gray-600 sm:col-span-2">Settings editing is waiting for the coordinated Project persistence changes. Existing values, including legacy statuses, are shown without modification.</p>}
           <label className="space-y-1 text-sm font-medium text-gray-700">Name
-            <input className="input-field w-full" value={name} onChange={(event) => setName(event.target.value)} maxLength={100} required disabled={!canManage || isArchived} />
+            <input className="input-field w-full" value={project.name} readOnly disabled />
           </label>
           <label className="space-y-1 text-sm font-medium text-gray-700">Owner
-            <select className="input-field w-full" value={ownerId} onChange={(event) => setOwnerId(event.target.value)} disabled={!canManage || isArchived} required={Boolean(project.ownerId)}>
-              {!project.ownerId && <option value="">No owner assigned (legacy project)</option>}
-              {orgMembers.map((member) => <option key={member.userId} value={member.userId}>{member.user.name} ({member.user.email})</option>)}
-            </select>
+            <input className="input-field w-full" value={project.ownerId ? orgMembers.find((member) => member.userId === project.ownerId)?.user.name ?? project.ownerId : 'No owner assigned (legacy project)'} readOnly disabled />
           </label>
           <label className="space-y-1 text-sm font-medium text-gray-700 sm:col-span-2">Description
-            <textarea className="input-field min-h-20 w-full" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} disabled={!canManage || isArchived} />
+            <textarea className="input-field min-h-20 w-full" value={project.description ?? ''} readOnly disabled />
           </label>
           <label className="space-y-1 text-sm font-medium text-gray-700">Status
-            <select className="input-field w-full" value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)} disabled={!canManage || isArchived}>
+            <select className="input-field w-full" value={status} disabled>
               {!statuses.includes(status as ProjectStatus) && <option value={status}>Existing legacy status: {status}</option>}
               {statuses.map((value) => <option key={value} value={value}>{value.replace('_', ' ')}</option>)}
             </select>
           </label>
           <label className="space-y-1 text-sm font-medium text-gray-700">Start date
-            <input className="input-field w-full" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} disabled={!canManage || isArchived} />
+            <input className="input-field w-full" type="date" value={startDate} readOnly disabled />
           </label>
           <label className="space-y-1 text-sm font-medium text-gray-700">Due date
-            <input className="input-field w-full" type="date" min={startDate || undefined} value={dueDate} onChange={(event) => setDueDate(event.target.value)} disabled={!canManage || isArchived} />
+            <input className="input-field w-full" type="date" value={dueDate} readOnly disabled />
           </label>
-          {canManage && <div className="sm:col-span-2"><button className="btn-primary text-sm" type="submit" disabled={saving || isArchived}>{saving ? 'Saving…' : 'Save changes'}</button></div>}
-        </form>
+        </section>
 
         <section className="card space-y-4 p-5">
           <div>
