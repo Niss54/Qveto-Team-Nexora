@@ -36,7 +36,7 @@ export default function ProjectDetailPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [ownerId, setOwnerId] = useState('');
-  const [status, setStatus] = useState<ProjectStatus>('ACTIVE');
+  const [status, setStatus] = useState<string>('ACTIVE');
   const [startDate, setStartDate] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [loading, setLoading] = useState(true);
@@ -72,7 +72,7 @@ export default function ProjectDetailPage() {
       setName(result.project.name);
       setDescription(result.project.description ?? '');
       setOwnerId(result.project.ownerId ?? '');
-      setStatus(statuses.includes(result.project.status as ProjectStatus) ? result.project.status as ProjectStatus : 'ACTIVE');
+      setStatus(result.project.status);
       setStartDate(dateValue(result.project.startDate));
       setDueDate(dateValue(result.project.dueDate));
       setSelectedMember((current) => current || availableOrgMembers.find((member) => !memberResult.members.some((existing) => existing.userId === member.userId))?.userId || '');
@@ -101,7 +101,7 @@ export default function ProjectDetailPage() {
         name: name.trim(),
         description: description.trim() || null,
         ...(ownerId ? { ownerId } : {}),
-        status,
+        ...(statuses.includes(status as ProjectStatus) ? { status: status as ProjectStatus } : {}),
         startDate: dateAtUtcMidnight(startDate),
         dueDate: dateAtUtcMidnight(dueDate),
       });
@@ -203,6 +203,7 @@ export default function ProjectDetailPage() {
           </label>
           <label className="space-y-1 text-sm font-medium text-gray-700">Status
             <select className="input-field w-full" value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)} disabled={!canManage || isArchived}>
+              {!statuses.includes(status as ProjectStatus) && <option value={status}>Existing legacy status: {status}</option>}
               {statuses.map((value) => <option key={value} value={value}>{value.replace('_', ' ')}</option>)}
             </select>
           </label>

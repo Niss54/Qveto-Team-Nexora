@@ -492,6 +492,8 @@ Removes an existing team membership.
 
 ### 6.6 Projects (PRD 02)
 
+This contract is being implemented incrementally. The current API exposes the workspace project list, project detail, member roster, member add/remove, and archive/restore operations. Project creation, general settings updates, owner transfer, and Project date persistence require the pending coordinated Prisma schema change and are not available yet.
+
 Projects belong to a workspace, and their organization is resolved through that workspace. Never trust client-supplied `orgId` or `workspaceId` outside the route. Every operation requires organization membership; project-scoped access also requires project membership unless the caller is an organization `OWNER` or `MANAGER`. An organization `OWNER`/`MANAGER` or the project `OWNER` may manage project settings and membership. Project creation is restricted to organization `OWNER`/`MANAGER`.
 
 New projects require `ownerId` for an existing member of the workspace organization. Creation transactionally stores the project and a matching `ProjectMember` with role `OWNER`. Changing the owner transactionally keeps the owner membership in sync. Existing ownerless projects remain readable and are never assigned an owner automatically; any later owner assignment is explicit.
@@ -499,7 +501,7 @@ New projects require `ownerId` for an existing member of the workspace organizat
 The accepted statuses are `PLANNING`, `ACTIVE`, `ON_HOLD`, `COMPLETED`, and `ARCHIVED`. Create/update requests may set the first four; archive and restore use dedicated operations. Legacy status strings are preserved and returned until explicitly reconciled. Dates are optional; when both `startDate` and `dueDate` are supplied, `startDate` must be on or before `dueDate`.
 
 #### `GET /api/workspaces/:workspaceId/projects`
-Lists projects in an active workspace, using `{ data, meta }` pagination. Organization `OWNER`/`MANAGER` roles see all projects in the workspace; other users see only projects where they are project members.
+Lists projects in a workspace the caller may access, using `{ data, meta }` pagination. Organization `OWNER`/`MANAGER` roles see all projects in the workspace; other users see only projects where they are project members. Visibility of archived workspaces follows the existing Workspace API rule: only organization `OWNER`/`MANAGER` roles may view them.
 - **Auth:** Required; workspace organization membership is verified server-side.
 - **Query:** `page` (default `1`), `pageSize` (default `20`, maximum `100`), `includeArchived` (default `false`). Archived projects are excluded unless explicitly requested; membership visibility remains enforced.
 - **Response (200 OK):** `{ "data": [Project], "meta": { "total": 0, "page": 1, "pageSize": 20, "totalPages": 0 } }`
