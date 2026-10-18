@@ -117,8 +117,10 @@ model OrganizationMember {
 model Workspace {
   id          String   @id @default(cuid())
   name        String
+  slug        String
   description String?
   orgId       String
+  archivedAt  DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -126,6 +128,7 @@ model Workspace {
   teams        Team[]
   projects     Project[]
 
+  @@unique([orgId, slug])
   @@index([orgId])
   @@map("workspaces")
 }

@@ -40,10 +40,29 @@ interface MockOrgMember {
 interface MockWorkspace {
   id: string;
   name: string;
+  slug: string;
   description: string | null;
   orgId: string;
+  archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+interface MockTeam {
+  id: string;
+  name: string;
+  description: string | null;
+  workspaceId: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface MockTeamMember {
+  id: string;
+  teamId: string;
+  userId: string;
+  role: string;
+  joinedAt: Date;
 }
 
 const mockUsers: MockUser[] = [];
@@ -51,6 +70,8 @@ const mockSessions: MockSession[] = [];
 const mockOrgs: MockOrg[] = [];
 const mockMembers: MockOrgMember[] = [];
 const mockWorkspaces: MockWorkspace[] = [];
+const mockTeams: MockTeam[] = [];
+const mockTeamMembers: MockTeamMember[] = [];
 
 // Mock prisma client with transactional support and relations
 vi.mock('../src/lib/prisma.js', () => {
@@ -231,17 +252,102 @@ vi.mock('../src/lib/prisma.js', () => {
   };
 
   const workspaceMethods = {
-    create: vi.fn(async ({ data }: { data: { name: string; description?: string | null; orgId: string } }) => {
+    findUnique: vi.fn(async ({ where }: { where: { id?: string; orgId_slug?: { orgId: string; slug: string } } }) => {
+      if (where.id) return mockWorkspaces.find((workspace) => workspace.id === where.id) || null;
+      if (where.orgId_slug) {
+        return mockWorkspaces.find((workspace) => workspace.orgId === where.orgId_slug!.orgId && workspace.slug === where.orgId_slug!.slug) || null;
+      }
+      return null;
+    }),
+    findFirst: vi.fn(async ({ where }: { where: { orgId?: string; slug?: string; id?: { not: string } } }) => {
+      return mockWorkspaces.find((workspace) =>
+        (!where.orgId || workspace.orgId === where.orgId) &&
+        (!where.slug || workspace.slug === where.slug) &&
+        (!where.id || workspace.id !== where.id.not),
+      ) || null;
+    }),
+    findMany: vi.fn(async ({ where, skip = 0, take = 100 }: { where: { orgId: string; archivedAt?: null }; skip?: number; take?: number }) =>
+      mockWorkspaces
+        .filter((workspace) => workspace.orgId === where.orgId && (where.archivedAt !== null || workspace.archivedAt === null))
+        .slice(skip, skip + take),
+    ),
+    count: vi.fn(async ({ where }: { where: { orgId: string; archivedAt?: null } }) =>
+      mockWorkspaces.filter((workspace) => workspace.orgId === where.orgId && (where.archivedAt !== null || workspace.archivedAt === null)).length,
+    ),
+    update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<MockWorkspace> }) => {
+      const workspace = mockWorkspaces.find((item) => item.id === where.id);
+      if (!workspace) throw new Error('Workspace not found');
+      Object.assign(workspace, data, { updatedAt: new Date() });
+      return workspace;
+    }),
+    create: vi.fn(async ({ data }: { data: { name: string; slug: string; description?: string | null; orgId: string; archivedAt: Date | null } }) => {
       const ws: MockWorkspace = {
         id: `ws_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         name: data.name,
+        slug: data.slug,
         description: data.description || null,
         orgId: data.orgId,
+        archivedAt: data.archivedAt,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
       mockWorkspaces.push(ws);
       return ws;
+    }),
+  };
+
+  const teamMethods = {
+    findMany: vi.fn(async ({ where }: { where: { workspaceId: string; members?: { some: { userId: string } } } }) => {
+      return mockTeams
+        .filter((team) => team.workspaceId === where.workspaceId)
+        .filter((team) => !where.members || mockTeamMembers.some((member) => member.teamId === team.id && member.userId === where.members!.some.userId))
+        .map((team) => ({
+          ...team,
+          members: mockTeamMembers.filter((member) => member.teamId === team.id).map((member) => {
+            const user = mockUsers.find((item) => item.id === member.userId)!;
+            return { ...member, user: { id: user.id, name: user.name, email: user.email } };
+          }),
+        }));
+    }),
+    findUnique: vi.fn(async ({ where, include }: { where: { id: string }; include?: { workspace?: unknown; members?: { where?: { userId?: string } } } }) => {
+      const team = mockTeams.find((item) => item.id === where.id);
+      if (!team) return null;
+      const workspace = mockWorkspaces.find((item) => item.id === team.workspaceId);
+      const members = mockTeamMembers.filter((member) => member.teamId === team.id && (!include?.members?.where?.userId || member.userId === include.members.where.userId));
+      if (include?.workspace) return { ...team, workspace, members };
+      return { ...team, members: members.map((member) => {
+        const user = mockUsers.find((item) => item.id === member.userId)!;
+        return { ...member, user: { id: user.id, name: user.name, email: user.email } };
+      }) };
+    }),
+    create: vi.fn(async ({ data }: { data: { name: string; description: string | null; workspaceId: string } }) => {
+      const team = { id: `team_${Date.now()}`, ...data, createdAt: new Date(), updatedAt: new Date() };
+      mockTeams.push(team);
+      return { ...team, members: [] };
+    }),
+    update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<MockTeam> }) => {
+      const team = mockTeams.find((item) => item.id === where.id);
+      if (!team) throw new Error('Team not found');
+      Object.assign(team, data, { updatedAt: new Date() });
+      return { ...team, members: mockTeamMembers.filter((member) => member.teamId === team.id).map((member) => {
+        const user = mockUsers.find((item) => item.id === member.userId)!;
+        return { ...member, user: { id: user.id, name: user.name, email: user.email } };
+      }) };
+    }),
+  };
+
+  const teamMemberMethods = {
+    create: vi.fn(async ({ data }: { data: { teamId: string; userId: string } }) => {
+      if (mockTeamMembers.some((member) => member.teamId === data.teamId && member.userId === data.userId)) throw { code: 'P2002' };
+      const member = { id: `tm_${Date.now()}`, ...data, role: 'MEMBER', joinedAt: new Date() };
+      mockTeamMembers.push(member);
+      return member;
+    }),
+    deleteMany: vi.fn(async ({ where }: { where: { teamId: string; userId: string } }) => {
+      const index = mockTeamMembers.findIndex((member) => member.teamId === where.teamId && member.userId === where.userId);
+      if (index < 0) return { count: 0 };
+      mockTeamMembers.splice(index, 1);
+      return { count: 1 };
     }),
   };
 
@@ -251,8 +357,21 @@ vi.mock('../src/lib/prisma.js', () => {
     organization: orgMethods,
     organizationMember: memberMethods,
     workspace: workspaceMethods,
-    $transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => {
-      return cb(prismaMock);
+    team: teamMethods,
+    teamMember: teamMemberMethods,
+    $queryRaw: vi.fn(async (parts: TemplateStringsArray, ...values: unknown[]) => {
+      const query = parts.join('?');
+      if (query.includes('lower(regexp_replace')) {
+        const orgId = values[0];
+        const name = String(values[1] ?? '').trim().toLowerCase();
+        return mockWorkspaces
+          .filter((workspace) => workspace.orgId === orgId && workspace.name.trim().toLowerCase() === name)
+          .map((workspace) => ({ id: workspace.id }));
+      }
+      return [];
+    }),
+    $transaction: vi.fn(async (arg: any) => {
+      return Array.isArray(arg) ? Promise.all(arg) : arg(prismaMock);
     }),
   };
 
@@ -286,6 +405,8 @@ describe('Authorization & Multi-Tenant Isolation System', () => {
     mockOrgs.length = 0;
     mockMembers.length = 0;
     mockWorkspaces.length = 0;
+    mockTeams.length = 0;
+    mockTeamMembers.length = 0;
 
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash('Password123!', salt);
@@ -380,6 +501,10 @@ describe('Authorization & Multi-Tenant Isolation System', () => {
       expect(res.body.organization.name).toBe('New Horizon');
       expect(res.body.organization.role).toBe('OWNER');
       expect(res.body.organization.slug).toBe('new-horizon');
+      const general = mockWorkspaces.find((workspace) => workspace.orgId === res.body.organization.id);
+      expect(general?.name).toBe('General');
+      expect(general?.slug).toBe('general');
+      expect(general?.archivedAt).toBeNull();
     });
 
     it('GET /api/organizations should list only organizations the user belongs to', async () => {
@@ -392,6 +517,214 @@ describe('Authorization & Multi-Tenant Isolation System', () => {
       expect(res.body.organizations[0].id).toBe(orgAlphaId);
       expect(res.body.organizations[0].name).toBe('Alpha Corp');
       expect(res.body.organizations[0].role).toBe('OWNER');
+    });
+  });
+
+  describe('Workspace API', () => {
+    const createWorkspace = async (name: string, cookie: string[] = aliceCookie) =>
+      request
+        .post(`/api/organizations/${orgAlphaId}/workspaces`)
+        .set('Cookie', cookie)
+        .send({ name });
+
+    it('allows an OWNER or MANAGER to create a workspace with a normalized server-generated slug', async () => {
+      const ownerRes = await createWorkspace('  Engineering & Platform  ');
+      expect(ownerRes.status).toBe(201);
+      expect(ownerRes.body.workspace.name).toBe('Engineering & Platform');
+      expect(ownerRes.body.workspace.slug).toBe('engineering-platform');
+      expect(ownerRes.body.workspace.archivedAt).toBeNull();
+
+      const managerRes = await createWorkspace('Operations', markCookie);
+      expect(managerRes.status).toBe(201);
+      expect(managerRes.body.workspace.slug).toBe('operations');
+    });
+
+    it('rejects duplicate names after trim and case normalization, including archived workspaces', async () => {
+      const created = await createWorkspace('Engineering');
+      expect(created.status).toBe(201);
+
+      const duplicate = await createWorkspace('  ENGINEERING  ');
+      expect(duplicate.status).toBe(409);
+      expect(duplicate.body.error.code).toBe('CONFLICT');
+
+      await request
+        .post(`/api/workspaces/${created.body.workspace.id}/archive`)
+        .set('Cookie', aliceCookie);
+      const archivedDuplicate = await createWorkspace('engineering');
+      expect(archivedDuplicate.status).toBe(409);
+    });
+
+    it('suffixes slug collisions deterministically and keeps a slug stable on rename', async () => {
+      const first = await createWorkspace('Research & Dev');
+      const second = await createWorkspace('Research Dev');
+      expect(first.body.workspace.slug).toBe('research-dev');
+      expect(second.body.workspace.slug).toBe('research-dev-2');
+
+      const renamed = await request
+        .patch(`/api/workspaces/${first.body.workspace.id}`)
+        .set('Cookie', aliceCookie)
+        .send({ name: 'Research Operations' });
+      expect(renamed.status).toBe(200);
+      expect(renamed.body.workspace.name).toBe('Research Operations');
+      expect(renamed.body.workspace.slug).toBe('research-dev');
+    });
+
+    it('rejects client attempts to set a slug and empty names with the validation envelope', async () => {
+      const slugAttempt = await request
+        .post(`/api/organizations/${orgAlphaId}/workspaces`)
+        .set('Cookie', aliceCookie)
+        .send({ name: 'Client Slug', slug: 'client-slug' });
+      expect(slugAttempt.status).toBe(400);
+      expect(slugAttempt.body.error.code).toBe('VALIDATION_ERROR');
+      expect(slugAttempt.body.error.requestId).toBeDefined();
+
+      const emptyName = await createWorkspace('   ');
+      expect(emptyName.status).toBe(400);
+      expect(emptyName.body.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('lists active workspaces with pagination and limits archived visibility to Owners and Managers', async () => {
+      const created = await createWorkspace('Active Workspace');
+      await request
+        .post(`/api/workspaces/${created.body.workspace.id}/archive`)
+        .set('Cookie', aliceCookie);
+
+      const activeList = await request
+        .get(`/api/organizations/${orgAlphaId}/workspaces`)
+        .set('Cookie', ericCookie);
+      expect(activeList.status).toBe(200);
+      expect(activeList.body.data).toHaveLength(0);
+      expect(activeList.body.meta.page).toBe(1);
+
+      const denied = await request
+        .get(`/api/organizations/${orgAlphaId}/workspaces?includeArchived=true`)
+        .set('Cookie', ericCookie);
+      expect(denied.status).toBe(403);
+
+      const ownerList = await request
+        .get(`/api/organizations/${orgAlphaId}/workspaces?includeArchived=true`)
+        .set('Cookie', aliceCookie);
+      expect(ownerList.status).toBe(200);
+      expect(ownerList.body.data).toHaveLength(1);
+      expect(ownerList.body.data[0].archivedAt).toBeDefined();
+    });
+
+    it('denies Employees mutations and cross-organization access', async () => {
+      const employeeCreate = await createWorkspace('Employee Attempt', ericCookie);
+      expect(employeeCreate.status).toBe(403);
+
+      const foreignCreate = await request
+        .post(`/api/organizations/${orgAlphaId}/workspaces`)
+        .set('Cookie', bobCookie)
+        .send({ name: 'Cross Tenant Attempt' });
+      expect(foreignCreate.status).toBe(403);
+
+      const created = await createWorkspace('Private Workspace');
+      const foreignRead = await request
+        .get(`/api/workspaces/${created.body.workspace.id}`)
+        .set('Cookie', bobCookie);
+      expect(foreignRead.status).toBe(403);
+    });
+
+    it('restores with the original slug and reports a conflict rather than renaming', async () => {
+      const created = await createWorkspace('Restore Me');
+      const workspaceId = created.body.workspace.id as string;
+      await request.post(`/api/workspaces/${workspaceId}/archive`).set('Cookie', aliceCookie);
+
+      // Simulate an out-of-band conflicting row to exercise the service guard.
+      mockWorkspaces.push({
+        id: 'ws_conflicting_slug',
+        name: 'Other Workspace',
+        slug: created.body.workspace.slug,
+        description: null,
+        orgId: orgAlphaId,
+        archivedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const conflict = await request.post(`/api/workspaces/${workspaceId}/restore`).set('Cookie', aliceCookie);
+      expect(conflict.status).toBe(409);
+      expect(mockWorkspaces.find((workspace) => workspace.id === workspaceId)?.slug).toBe('restore-me');
+    });
+
+    it('requires authentication', async () => {
+      const response = await request.get(`/api/organizations/${orgAlphaId}/workspaces`);
+      expect(response.status).toBe(401);
+      expect(response.body.error.code).toBe('UNAUTHORIZED');
+    });
+  });
+
+  describe('Team API', () => {
+    const workspaceId = 'ws_team_alpha';
+
+    beforeEach(() => {
+      mockWorkspaces.push({
+        id: workspaceId,
+        name: 'Teams',
+        slug: 'teams',
+        description: null,
+        orgId: orgAlphaId,
+        archivedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+
+    it('lets managers create teams and manage roster members who belong to the organization', async () => {
+      const created = await request
+        .post(`/api/workspaces/${workspaceId}/teams`)
+        .set('Cookie', markCookie)
+        .send({ name: 'Platform', description: 'Platform group' });
+      expect(created.status).toBe(201);
+      const teamId = created.body.team.id as string;
+
+      const invalidMember = await request
+        .post(`/api/teams/${teamId}/members`)
+        .set('Cookie', aliceCookie)
+        .send({ userId: bobId });
+      expect(invalidMember.status).toBe(400);
+
+      const added = await request
+        .post(`/api/teams/${teamId}/members`)
+        .set('Cookie', aliceCookie)
+        .send({ userId: ericId });
+      expect(added.status).toBe(201);
+      expect(added.body.team.members[0].userId).toBe(ericId);
+
+      const employeeList = await request.get(`/api/workspaces/${workspaceId}/teams`).set('Cookie', ericCookie);
+      expect(employeeList.status).toBe(200);
+      expect(employeeList.body.teams).toHaveLength(1);
+
+      const employeeUpdate = await request
+        .patch(`/api/teams/${teamId}`)
+        .set('Cookie', ericCookie)
+        .send({ name: 'Nope' });
+      expect(employeeUpdate.status).toBe(403);
+
+      const foreignRead = await request.get(`/api/teams/${teamId}`).set('Cookie', bobCookie);
+      expect(foreignRead.status).toBe(403);
+
+      const removed = await request.delete(`/api/teams/${teamId}/members/${ericId}`).set('Cookie', markCookie);
+      expect(removed.status).toBe(200);
+      const employeeListAfterRemoval = await request.get(`/api/workspaces/${workspaceId}/teams`).set('Cookie', ericCookie);
+      expect(employeeListAfterRemoval.body.teams).toHaveLength(0);
+    });
+
+    it('rejects team creation in archived workspaces', async () => {
+      const created = await request
+        .post(`/api/workspaces/${workspaceId}/teams`)
+        .set('Cookie', aliceCookie)
+        .send({ name: 'Existing Team' });
+      expect(created.status).toBe(201);
+
+      mockWorkspaces[0].archivedAt = new Date();
+
+      const createArchived = await request
+        .post(`/api/workspaces/${workspaceId}/teams`)
+        .set('Cookie', aliceCookie)
+        .send({ name: 'Blocked Team' });
+      expect(createArchived.status).toBe(409);
+
     });
   });
 
