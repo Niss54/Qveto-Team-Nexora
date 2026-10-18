@@ -67,7 +67,7 @@ beforeEach(() => {
       ? { id: USER, email: 'alice@example.com', name: 'Alice' }
       : null,
   );
-  mocks.projectFindUnique.mockResolvedValue({ workspace: { orgId: ORG } });
+  mocks.projectFindUnique.mockResolvedValue({ status: 'ACTIVE', workspace: { orgId: ORG } });
   mocks.orgMemberFindUnique.mockResolvedValue({ userId: USER, orgId: ORG });
   mocks.projectMemberFindUnique.mockResolvedValue({ userId: USER, projectId: PROJECT });
   mocks.taskFindUnique.mockResolvedValue({ id: TASK, projectId: PROJECT, archivedAt: null });
@@ -88,6 +88,25 @@ beforeEach(() => {
 });
 
 describe('PRD 03 Label APIs', () => {
+  it('blocks label mutations on archived projects while keeping label reads available', async () => {
+    mocks.projectFindUnique.mockResolvedValue({ status: 'ARCHIVED', workspace: { orgId: ORG } });
+
+    const projectRead = await supertest(app).get(projectPath).set('Authorization', 'Bearer session-a');
+    const taskRead = await supertest(app).get(taskPath).set('Authorization', 'Bearer session-a');
+    const createProjectLabel = await supertest(app).post(projectPath)
+      .set('Authorization', 'Bearer session-a').send({ name: 'Urgent' });
+    const addTaskLabel = await supertest(app).post(taskPath)
+      .set('Authorization', 'Bearer session-a').send({ labelId: LABEL });
+    const removeTaskLabel = await supertest(app).delete(`${taskPath}/${LABEL}`)
+      .set('Authorization', 'Bearer session-a');
+
+    expect([projectRead.status, taskRead.status]).toEqual([200, 200]);
+    expect([createProjectLabel.status, addTaskLabel.status, removeTaskLabel.status]).toEqual([409, 409, 409]);
+    expect(mocks.labelCreate).not.toHaveBeenCalled();
+    expect(mocks.taskLabelCreate).not.toHaveBeenCalled();
+    expect(mocks.taskLabelDeleteMany).not.toHaveBeenCalled();
+  });
+
   describe('Project labels', () => {
     it('lists labels belonging to the project organization', async () => {
       const response = await supertest(app)

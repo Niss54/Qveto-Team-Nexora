@@ -120,6 +120,12 @@ export class TaskService {
     return { project, orgId };
   }
 
+  private ensureProjectActive(project: { status: string }): void {
+    if (project.status === 'ARCHIVED') {
+      throw new AppError(409, 'CONFLICT', 'Archived projects cannot be modified');
+    }
+  }
+
   /**
    * Validate that an assignee is a member of the project
    * and its organization.
@@ -169,10 +175,11 @@ export class TaskService {
     userId: string,
     input: CreateTaskInput,
   ) {
-    const { orgId } = await this.verifyProjectAccess(
+    const { project, orgId } = await this.verifyProjectAccess(
       projectId,
       userId,
     );
+    this.ensureProjectActive(project);
 
     if (input.assigneeId) {
       await this.verifyAssignee(
@@ -372,10 +379,11 @@ export class TaskService {
       );
     }
 
-    const { orgId } = await this.verifyProjectAccess(
+    const { project, orgId } = await this.verifyProjectAccess(
       existing.projectId,
       userId,
     );
+    this.ensureProjectActive(project);
 
     if (Object.keys(input).length === 0) {
       throw new AppError(
@@ -582,10 +590,11 @@ export class TaskService {
       );
     }
 
-    const { orgId } = await this.verifyProjectAccess(
+    const { project, orgId } = await this.verifyProjectAccess(
       existingTask.projectId,
       userId,
     );
+    this.ensureProjectActive(project);
 
     return prisma.$transaction(async (tx) => {
       const result = await tx.task.updateMany({
@@ -653,7 +662,8 @@ export class TaskService {
       throw new AppError(404, 'NOT_FOUND', 'Parent task not found');
     }
 
-    await this.verifyProjectAccess(parent.projectId, userId);
+    const { project } = await this.verifyProjectAccess(parent.projectId, userId);
+    this.ensureProjectActive(project);
 
     if (
       input.parentTaskId !== undefined &&

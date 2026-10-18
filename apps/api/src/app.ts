@@ -12,7 +12,7 @@ import {
   errorHandler,
   notFoundHandler,
 } from './middleware/index.js';
-import { healthRouter, authRouter, organizationRouter, workspaceRouter, teamRouter } from './routes/index.js';
+import { healthRouter, authRouter, organizationRouter, workspaceRouter, teamRouter, projectRouter } from './routes/index.js';
 
 /**
  * Creates and configures the Express application.
@@ -51,6 +51,7 @@ export function createApp(corsOrigin: string = 'http://localhost:3000'): express
   app.use('/api/organizations', organizationRouter);
   app.use('/api', workspaceRouter);
   app.use('/api', teamRouter);
+  app.use('/api', projectRouter);
   app.use('/api/projects/:projectId/tasks', taskRouter);
   app.use('/api/projects/:projectId/labels', projectLabelsRouter);
   app.use('/api/tasks/:taskId/labels', taskLabelsRouter);

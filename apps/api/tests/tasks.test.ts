@@ -110,6 +110,7 @@ beforeEach(() => {
       if (where.id === PROJECT_A) {
         return {
           id: PROJECT_A,
+          status: 'ACTIVE',
           workspace: { orgId: ORG_A },
         };
       }
@@ -117,6 +118,7 @@ beforeEach(() => {
       if (where.id === PROJECT_B) {
         return {
           id: PROJECT_B,
+          status: 'ACTIVE',
           workspace: { orgId: ORG_B },
         };
       }
@@ -484,6 +486,37 @@ describe('PRD 03 Task APIs', () => {
         .set('Authorization', 'Bearer session-a');
 
       expect(response.status).toBe(403);
+    });
+  });
+
+  describe('Archived project mutation guard', () => {
+    it('rejects task creation, updates, archives, and subtasks while preserving read access', async () => {
+      mocks.projectFindUnique.mockResolvedValue({
+        id: PROJECT_A,
+        status: 'ARCHIVED',
+        workspace: { orgId: ORG_A },
+      });
+
+      const create = await supertest(app)
+        .post(basePath).set('Authorization', 'Bearer session-a')
+        .send({ title: 'New task' });
+      const update = await supertest(app)
+        .patch('/api/tasks/task-1').set('Authorization', 'Bearer session-a')
+        .send({ title: 'Changed task' });
+      const archive = await supertest(app)
+        .post('/api/tasks/task-1/archive').set('Authorization', 'Bearer session-a');
+      const subtask = await supertest(app)
+        .post('/api/tasks/task-1/subtasks').set('Authorization', 'Bearer session-a')
+        .send({ title: 'New child task' });
+
+      expect([create.status, update.status, archive.status, subtask.status]).toEqual([409, 409, 409, 409]);
+      expect(mocks.taskCreate).not.toHaveBeenCalled();
+      expect(mocks.taskUpdateMany).not.toHaveBeenCalled();
+
+      const read = await supertest(app)
+        .get(basePath).set('Authorization', 'Bearer session-a');
+      expect(read.status).toBe(200);
+      expect(mocks.taskFindMany).toHaveBeenCalled();
     });
   });
 });

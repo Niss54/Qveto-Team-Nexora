@@ -3,3 +3,4 @@ export { authRouter } from './auth.js';
 export { organizationRouter } from './organization.js';
 export { workspaceRouter } from './workspace.js';
 export { teamRouter } from './team.js';
+export { projectRouter } from './project.js';
