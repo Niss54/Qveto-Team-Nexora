@@ -36,7 +36,7 @@ function serialize(task: BoardTask) {
 async function authorize(projectId: string, userId: string) {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { workspace: { select: { orgId: true } } },
+    select: { status: true, workspace: { select: { orgId: true } } },
   });
   if (!project) throw new AppError(404, 'NOT_FOUND', 'Project not found');
   const orgId = project.workspace.orgId;
@@ -47,7 +47,13 @@ async function authorize(projectId: string, userId: string) {
   if (!orgMember || !projectMember) {
     throw new AppError(403, 'FORBIDDEN', 'You do not have access to this project');
   }
-  return orgId;
+  return { orgId, status: project.status };
+}
+
+function ensureProjectActive(status: string): void {
+  if (status === 'ARCHIVED') {
+    throw new AppError(409, 'CONFLICT', 'Archived projects cannot be modified');
+  }
 }
 
 function makeColumns(tasks: BoardTask[]) {
@@ -71,7 +77,8 @@ export class KanbanService {
     userId: string,
     input: { taskId: string; status: KanbanStatus; targetIndex: number },
   ) {
-    const orgId = await authorize(projectId, userId);
+    const { orgId, status } = await authorize(projectId, userId);
+    ensureProjectActive(status);
     try {
       // Serializable isolation prevents two simultaneous reorder requests from
       // silently overwriting one another. A serialization failure returns 409.

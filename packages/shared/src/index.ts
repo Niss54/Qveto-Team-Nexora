@@ -235,6 +235,76 @@ export const teamResponseSchema = z.object({
 });
 export type TeamResponse = z.infer<typeof teamResponseSchema>;
 
+// ============================================================
+// Project Schemas (PRD 02)
+// ============================================================
+
+/** Supported Project lifecycle values. */
+export const ProjectStatus = z.enum(['PLANNING', 'ACTIVE', 'ON_HOLD', 'COMPLETED', 'ARCHIVED']);
+export type ProjectStatus = z.infer<typeof ProjectStatus>;
+
+const projectDateRange = <T extends z.ZodTypeAny>(schema: T) => schema.refine(
+  (data: { startDate?: Date | null; dueDate?: Date | null }) =>
+    !data.startDate || !data.dueDate || data.startDate <= data.dueDate,
+  { message: 'startDate must be before or equal to dueDate', path: ['dueDate'] },
+);
+
+export const createProjectSchema = projectDateRange(z.object({
+  name: z.string().trim().min(1, 'Project name is required').max(100, 'Project name too long'),
+  description: z.string().trim().max(500, 'Description too long').nullable().optional(),
+  ownerId: z.string().min(1, 'Project owner is required'),
+  status: ProjectStatus.default('ACTIVE'),
+  startDate: z.coerce.date().nullable().optional(),
+  dueDate: z.coerce.date().nullable().optional(),
+}).strict());
+export type CreateProjectInput = z.infer<typeof createProjectSchema>;
+
+export const updateProjectSchema = projectDateRange(z.object({
+  name: z.string().trim().min(1, 'Project name is required').max(100, 'Project name too long').optional(),
+  description: z.string().trim().max(500, 'Description too long').nullable().optional(),
+  ownerId: z.string().min(1, 'Project owner is required').optional(),
+  status: ProjectStatus.optional(),
+  startDate: z.coerce.date().nullable().optional(),
+  dueDate: z.coerce.date().nullable().optional(),
+}).strict()).refine((data) => Object.keys(data).length > 0, {
+  message: 'At least one project field must be provided',
+});
+export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
+
+export const projectListQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(20),
+  includeArchived: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+}).strict();
+export type ProjectListQuery = z.infer<typeof projectListQuerySchema>;
+
+export const addProjectMemberSchema = z.object({ userId: z.string().min(1) }).strict();
+export type AddProjectMemberInput = z.infer<typeof addProjectMemberSchema>;
+
+export const projectResponseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  status: z.string(),
+  startDate: z.string().nullable(),
+  dueDate: z.string().nullable(),
+  ownerId: z.string().nullable(),
+  workspaceId: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type ProjectResponse = z.infer<typeof projectResponseSchema>;
+
+export const projectMemberResponseSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  projectId: z.string(),
+  role: z.string(),
+  joinedAt: z.string(),
+  user: z.object({ id: z.string(), name: z.string(), email: z.string() }),
+});
+export type ProjectMemberResponse = z.infer<typeof projectMemberResponseSchema>;
+
 export const taskResponseSchema = z.object({
   id: z.string(),
   title: z.string(),

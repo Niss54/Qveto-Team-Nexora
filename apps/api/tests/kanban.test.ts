@@ -36,7 +36,7 @@ beforeEach(() => {
   mocks.validateSession.mockImplementation(async (token: string) =>
     token === 'session-a' ? { id: 'user-a', email: 'a@example.com', name: 'A' } : null,
   );
-  mocks.projectFindUnique.mockResolvedValue({ workspace: { orgId: 'org-a' } });
+  mocks.projectFindUnique.mockResolvedValue({ status: 'ACTIVE', workspace: { orgId: 'org-a' } });
   mocks.orgMemberFindUnique.mockResolvedValue({ userId: 'user-a', orgId: 'org-a' });
   mocks.projectMemberFindUnique.mockResolvedValue({ userId: 'user-a', projectId: 'project-a' });
   mocks.taskFindMany.mockResolvedValue(initial);
@@ -53,6 +53,19 @@ beforeEach(() => {
 });
 
 describe('PRD 03 Kanban API', () => {
+  it('allows reading an archived project board but rejects task moves', async () => {
+    mocks.projectFindUnique.mockResolvedValue({ status: 'ARCHIVED', workspace: { orgId: 'org-a' } });
+
+    const read = await supertest(app).get(root).set('Authorization', 'Bearer session-a');
+    const move = await supertest(app).patch(`${root}/move`).set('Authorization', 'Bearer session-a')
+      .send({ taskId: 't1', status: 'IN_PROGRESS', targetIndex: 0 });
+
+    expect(read.status).toBe(200);
+    expect(move.status).toBe(409);
+    expect(mocks.taskUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
   it('returns four columns, even when some are empty', async () => {
     const res = await supertest(app).get(root).set('Authorization', 'Bearer session-a');
     expect(res.status).toBe(200);
