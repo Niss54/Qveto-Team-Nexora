@@ -28,11 +28,23 @@ describePersistence('Project API persistence (isolated database only)', () => {
     await prisma.$transaction(async (tx) => {
       await tx.user.createMany({
         data: [
-          { id: actorId, email: `${actorId}@example.test`, name: 'Audit Actor', passwordHash: 'unused-test-hash' },
-          { id: selectedOwnerId, email: `${selectedOwnerId}@example.test`, name: 'Selected Owner', passwordHash: 'unused-test-hash' },
+          {
+            id: actorId,
+            email: `${actorId}@example.test`,
+            name: 'Audit Actor',
+            passwordHash: 'unused-test-hash',
+          },
+          {
+            id: selectedOwnerId,
+            email: `${selectedOwnerId}@example.test`,
+            name: 'Selected Owner',
+            passwordHash: 'unused-test-hash',
+          },
         ],
       });
-      await tx.organization.create({ data: { id: organizationId, name: 'PRD02 Persistence Test', slug: orgSlug } });
+      await tx.organization.create({
+        data: { id: organizationId, name: 'PRD02 Persistence Test', slug: orgSlug },
+      });
       await tx.organizationMember.createMany({
         data: [
           { orgId: organizationId, userId: actorId, role: 'OWNER' },
@@ -40,7 +52,12 @@ describePersistence('Project API persistence (isolated database only)', () => {
         ],
       });
       await tx.workspace.create({
-        data: { id: workspaceId, name: 'Persistence Workspace', slug: `workspace-${suffix}`, orgId: organizationId },
+        data: {
+          id: workspaceId,
+          name: 'Persistence Workspace',
+          slug: `workspace-${suffix}`,
+          orgId: organizationId,
+        },
       });
     });
 
@@ -108,7 +125,92 @@ describePersistence('Project API persistence (isolated database only)', () => {
       .set('Authorization', 'Bearer persistence-session')
       .send({ startDate: '2026-11-22T00:00:00.000Z' });
     expect(invalidDateUpdate.status).toBe(400);
-    const afterRejectedUpdate = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
+    const afterRejectedUpdate = await prisma.project.findUniqueOrThrow({
+      where: { id: projectId },
+    });
     expect(afterRejectedUpdate.startDate?.toISOString()).toBe('2026-10-21T00:00:00.000Z');
+
+    const realTransaction = prisma.$transaction.bind(prisma);
+    const transactionSpy = vi.spyOn(prisma, '$transaction');
+    const attemptedMembershipWrites = { demotion: 0, ownerPromotion: 0 };
+    let injectedProjectUpdateFailure = false;
+    transactionSpy.mockImplementation((async (operation: unknown, options?: unknown) => {
+      if (typeof operation !== 'function') {
+        return realTransaction(operation as never, options as never);
+      }
+
+      return realTransaction(async (tx) => {
+        const txWithFailureInjection = new Proxy(tx, {
+          get(target, property) {
+            if (property === 'projectMember') {
+              return new Proxy(target.projectMember, {
+                get(delegate, method) {
+                  const value = Reflect.get(delegate, method, delegate);
+                  if (method === 'updateMany' || method === 'upsert') {
+                    return async (...args: never[]) => {
+                      const result = await value.apply(delegate, args);
+                      if (method === 'updateMany') attemptedMembershipWrites.demotion += 1;
+                      if (method === 'upsert') attemptedMembershipWrites.ownerPromotion += 1;
+                      return result;
+                    };
+                  }
+                  return typeof value === 'function' ? value.bind(delegate) : value;
+                },
+              });
+            }
+            if (property === 'project') {
+              return new Proxy(target.project, {
+                get(delegate, method) {
+                  if (method === 'update') {
+                    return async (args: { where: { id: string } }) => {
+                      if (args.where.id === projectId) {
+                        injectedProjectUpdateFailure = true;
+                        throw new Error('injected project update failure after membership writes');
+                      }
+                      return delegate.update(args as never);
+                    };
+                  }
+                  const value = Reflect.get(delegate, method, delegate);
+                  return typeof value === 'function' ? value.bind(delegate) : value;
+                },
+              });
+            }
+            const value = Reflect.get(target, property, target);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+        return operation(txWithFailureInjection);
+      }, options as never);
+    }) as typeof prisma.$transaction);
+
+    let failedTransfer;
+    try {
+      failedTransfer = await supertest(app)
+        .patch(`/api/projects/${projectId}`)
+        .set('Authorization', 'Bearer persistence-session')
+        .send({
+          ownerId: selectedOwnerId,
+          startDate: '2026-10-22T00:00:00.000Z',
+          dueDate: '2026-11-22T00:00:00.000Z',
+        });
+    } finally {
+      transactionSpy.mockRestore();
+    }
+
+    expect(failedTransfer.status).toBe(500);
+    expect(attemptedMembershipWrites).toEqual({ demotion: 1, ownerPromotion: 1 });
+    expect(injectedProjectUpdateFailure).toBe(true);
+    const afterFailedTransfer = await prisma.project.findUniqueOrThrow({
+      where: { id: projectId },
+      include: { members: { orderBy: { userId: 'asc' } } },
+    });
+    expect(afterFailedTransfer.ownerId).toBe(actorId);
+    expect(afterFailedTransfer.startDate?.toISOString()).toBe('2026-10-21T00:00:00.000Z');
+    expect(afterFailedTransfer.dueDate?.toISOString()).toBe('2026-11-21T00:00:00.000Z');
+    expect(afterFailedTransfer.members).toEqual([
+      expect.objectContaining({ userId: actorId, role: 'OWNER' }),
+      expect.objectContaining({ userId: selectedOwnerId, role: 'MEMBER' }),
+    ]);
+    expect(afterFailedTransfer.members.filter((member) => member.role === 'OWNER')).toHaveLength(1);
   });
 });
