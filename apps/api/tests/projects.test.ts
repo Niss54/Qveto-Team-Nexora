@@ -7,11 +7,14 @@ const mocks = vi.hoisted(() => ({
   projectFindUnique: vi.fn(),
   projectFindMany: vi.fn(),
   projectCount: vi.fn(),
+  projectCreate: vi.fn(),
   projectUpdate: vi.fn(),
   orgMemberFindUnique: vi.fn(),
   projectMemberFindMany: vi.fn(),
   projectMemberFindUnique: vi.fn(),
   projectMemberCreate: vi.fn(),
+  projectMemberUpdateMany: vi.fn(),
+  projectMemberUpsert: vi.fn(),
   projectMemberDeleteMany: vi.fn(),
   transaction: vi.fn(),
 }));
@@ -27,6 +30,7 @@ vi.mock('../src/lib/prisma.js', () => ({
       findUnique: mocks.projectFindUnique,
       findMany: mocks.projectFindMany,
       count: mocks.projectCount,
+      create: mocks.projectCreate,
       update: mocks.projectUpdate,
     },
     organizationMember: { findUnique: mocks.orgMemberFindUnique },
@@ -34,6 +38,8 @@ vi.mock('../src/lib/prisma.js', () => ({
       findMany: mocks.projectMemberFindMany,
       findUnique: mocks.projectMemberFindUnique,
       create: mocks.projectMemberCreate,
+      updateMany: mocks.projectMemberUpdateMany,
+      upsert: mocks.projectMemberUpsert,
       deleteMany: mocks.projectMemberDeleteMany,
     },
     $transaction: mocks.transaction,
@@ -55,6 +61,9 @@ function makeProject(overrides: Record<string, unknown> = {}) {
     name: 'Project A',
     description: null,
     status: 'ACTIVE',
+    startDate: null,
+    dueDate: null,
+    ownerId: null,
     workspaceId,
     createdAt: date,
     updatedAt: date,
@@ -71,11 +80,12 @@ beforeEach(() => {
   mocks.workspaceFindUnique.mockResolvedValue({ id: workspaceId, orgId, archivedAt: null });
   mocks.projectFindUnique.mockImplementation(async (args: { include?: unknown; select?: unknown }) => {
     if (args.include) return makeProject({ members: [] });
-    if (args.select) return { status: 'ACTIVE', workspace: { orgId, archivedAt: null }, members: [{ id: 'pm-a', role: 'MEMBER' }] };
+    if (args.select) return { status: 'ACTIVE', startDate: null, dueDate: null, workspace: { orgId, archivedAt: null }, members: [{ id: 'pm-a', role: 'MEMBER' }] };
     return null;
   });
   mocks.projectFindMany.mockResolvedValue([makeProject()]);
   mocks.projectCount.mockResolvedValue(1);
+  mocks.projectCreate.mockResolvedValue({ id: projectId });
   mocks.projectUpdate.mockResolvedValue(makeProject());
   mocks.orgMemberFindUnique.mockImplementation(async ({ where }: { where: { userId_orgId: { userId: string; orgId: string } } }) => {
     const target = where.userId_orgId;
@@ -84,6 +94,8 @@ beforeEach(() => {
   });
   mocks.projectMemberFindUnique.mockResolvedValue({ role: 'MEMBER' });
   mocks.projectMemberCreate.mockResolvedValue({ id: 'pm-new' });
+  mocks.projectMemberUpdateMany.mockResolvedValue({ count: 1 });
+  mocks.projectMemberUpsert.mockResolvedValue({ id: 'pm-owner' });
   mocks.projectMemberDeleteMany.mockResolvedValue({ count: 1 });
   mocks.projectMemberFindMany.mockResolvedValue([{
     id: 'pm-a', userId, projectId, role: 'MEMBER', joinedAt: date,
@@ -92,14 +104,259 @@ beforeEach(() => {
   mocks.transaction.mockImplementation((input: Promise<unknown>[] | ((tx: unknown) => Promise<unknown>)) => {
     if (typeof input !== 'function') return Promise.all(input);
     return input({
-      project: { findUnique: mocks.projectFindUnique },
+      workspace: { findUnique: mocks.workspaceFindUnique },
+      project: {
+        findUnique: mocks.projectFindUnique,
+        create: mocks.projectCreate,
+        update: mocks.projectUpdate,
+      },
       organizationMember: { findUnique: mocks.orgMemberFindUnique },
       projectMember: {
         findUnique: mocks.projectMemberFindUnique,
         create: mocks.projectMemberCreate,
+        updateMany: mocks.projectMemberUpdateMany,
+        upsert: mocks.projectMemberUpsert,
         deleteMany: mocks.projectMemberDeleteMany,
       },
     });
+  });
+});
+
+describe('Project write API', () => {
+  const validProject = {
+    name: 'Launch plan',
+    description: 'First phase',
+    ownerId: 'user-b',
+    status: 'PLANNING',
+    startDate: '2026-10-20T00:00:00.000Z',
+    dueDate: '2026-11-20T00:00:00.000Z',
+  };
+
+  it('creates a project with its explicit owner membership and dates transactionally', async () => {
+    mocks.orgMemberFindUnique.mockResolvedValue({ id: 'om-a', orgId, userId, role: 'MANAGER' });
+    mocks.projectFindUnique.mockImplementation(async (args: { include?: unknown; select?: unknown }) =>
+      args.include
+        ? makeProject({
+          ownerId: 'user-b',
+          startDate: new Date(validProject.startDate),
+          dueDate: new Date(validProject.dueDate),
+        })
+        : { status: 'ACTIVE', startDate: null, dueDate: null, workspace: { orgId }, members: [] },
+    );
+
+    const response = await supertest(app)
+      .post(`/api/workspaces/${workspaceId}/projects`)
+      .set('Authorization', 'Bearer session-a')
+      .send(validProject);
+
+    expect(response.status).toBe(201);
+    expect(response.body.project).toMatchObject({
+      id: projectId,
+      ownerId: 'user-b',
+      startDate: validProject.startDate,
+      dueDate: validProject.dueDate,
+    });
+    expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
+    expect(mocks.projectCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        name: 'Launch plan',
+        workspace: { connect: { id: workspaceId } },
+        owner: { connect: { id: 'user-b' } },
+        startDate: new Date(validProject.startDate),
+        dueDate: new Date(validProject.dueDate),
+      }),
+      select: { id: true },
+    }));
+    expect(mocks.projectMemberCreate).toHaveBeenCalledWith({
+      data: { projectId, userId: 'user-b', role: 'OWNER' },
+    });
+  });
+
+  it('rejects creation by employees, for archived workspaces, and with a non-organization owner', async () => {
+    mocks.orgMemberFindUnique.mockResolvedValue({ id: 'om-a', orgId, userId, role: 'EMPLOYEE' });
+    const employee = await supertest(app)
+      .post(`/api/workspaces/${workspaceId}/projects`)
+      .set('Authorization', 'Bearer session-a')
+      .send(validProject);
+    expect(employee.status).toBe(403);
+    expect(mocks.transaction).not.toHaveBeenCalled();
+
+    mocks.orgMemberFindUnique.mockResolvedValue({ id: 'om-a', orgId, userId, role: 'MANAGER' });
+    mocks.workspaceFindUnique.mockResolvedValue({ id: workspaceId, orgId, archivedAt: date });
+    const archivedWorkspace = await supertest(app)
+      .post(`/api/workspaces/${workspaceId}/projects`)
+      .set('Authorization', 'Bearer session-a')
+      .send(validProject);
+    expect(archivedWorkspace.status).toBe(409);
+    expect(mocks.projectCreate).not.toHaveBeenCalled();
+
+    mocks.workspaceFindUnique.mockResolvedValue({ id: workspaceId, orgId, archivedAt: null });
+    mocks.orgMemberFindUnique.mockImplementation(async ({ where }: { where: { userId_orgId: { userId: string; orgId: string } } }) =>
+      where.userId_orgId.userId === userId ? { id: 'om-a', orgId, userId, role: 'MANAGER' } : null,
+    );
+    const invalidOwner = await supertest(app)
+      .post(`/api/workspaces/${workspaceId}/projects`)
+      .set('Authorization', 'Bearer session-a')
+      .send(validProject);
+    expect(invalidOwner.status).toBe(400);
+    expect(mocks.projectCreate).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid date ranges and cross-tenant project updates', async () => {
+    mocks.orgMemberFindUnique.mockResolvedValue({ id: 'om-a', orgId, userId, role: 'MANAGER' });
+    const invalidDates = await supertest(app)
+      .post(`/api/workspaces/${workspaceId}/projects`)
+      .set('Authorization', 'Bearer session-a')
+      .send({ ...validProject, startDate: '2026-12-01T00:00:00.000Z', dueDate: '2026-11-01T00:00:00.000Z' });
+    expect(invalidDates.status).toBe(400);
+    expect(mocks.transaction).not.toHaveBeenCalled();
+
+    mocks.projectFindUnique.mockResolvedValue({
+      status: 'ACTIVE', startDate: null, dueDate: null,
+      workspace: { orgId: 'other-org', archivedAt: null }, members: [],
+    });
+    mocks.orgMemberFindUnique.mockImplementation(async ({ where }: { where: { userId_orgId: { userId: string; orgId: string } } }) =>
+      where.userId_orgId.orgId === orgId ? { id: 'om-a', orgId, userId, role: 'MANAGER' } : null,
+    );
+    const crossTenant = await supertest(app)
+      .patch(`/api/projects/${projectId}`)
+      .set('Authorization', 'Bearer session-a')
+      .send({ name: 'Changed' });
+    expect(crossTenant.status).toBe(403);
+    expect(mocks.projectUpdate).not.toHaveBeenCalled();
+  });
+
+  it('updates settings, dates, and owner membership transactionally', async () => {
+    mocks.orgMemberFindUnique.mockResolvedValue({ id: 'om-a', orgId, userId, role: 'MANAGER' });
+    mocks.projectFindUnique.mockImplementation(async (args: { include?: unknown; select?: unknown }) =>
+      args.include
+        ? makeProject({
+          ownerId: 'user-b',
+          startDate: new Date('2026-10-21T00:00:00.000Z'),
+          dueDate: new Date('2026-11-30T00:00:00.000Z'),
+        })
+        : { status: 'ACTIVE', startDate: null, dueDate: null, workspace: { orgId }, members: [] },
+    );
+
+    const response = await supertest(app)
+      .patch(`/api/projects/${projectId}`)
+      .set('Authorization', 'Bearer session-a')
+      .send({
+        name: 'Updated name',
+        ownerId: 'user-b',
+        startDate: '2026-10-21T00:00:00.000Z',
+        dueDate: '2026-11-30T00:00:00.000Z',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.project).toMatchObject({ ownerId: 'user-b' });
+    expect(mocks.projectMemberUpdateMany).toHaveBeenCalledWith({
+      where: { projectId, role: 'OWNER', userId: { not: 'user-b' } },
+      data: { role: 'MEMBER' },
+    });
+    expect(mocks.projectMemberUpsert).toHaveBeenCalledWith({
+      where: { userId_projectId: { userId: 'user-b', projectId } },
+      create: { projectId, userId: 'user-b', role: 'OWNER' },
+      update: { role: 'OWNER' },
+    });
+    expect(mocks.projectUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: projectId },
+      data: expect.objectContaining({ owner: { connect: { id: 'user-b' } } }),
+    }));
+  });
+
+  it('allows the project OWNER to update settings but rejects a regular project member', async () => {
+    mocks.orgMemberFindUnique.mockResolvedValue({ id: 'om-a', orgId, userId, role: 'EMPLOYEE' });
+    mocks.projectFindUnique.mockImplementation(async (args: { include?: unknown; select?: unknown }) =>
+      args.include
+        ? makeProject()
+        : {
+          status: 'ACTIVE', startDate: null, dueDate: null,
+          workspace: { orgId, archivedAt: null },
+          members: [{ id: 'pm-a', role: 'OWNER' }],
+        },
+    );
+    const ownerUpdate = await supertest(app)
+      .patch(`/api/projects/${projectId}`)
+      .set('Authorization', 'Bearer session-a')
+      .send({ name: 'Owner update' });
+    expect(ownerUpdate.status).toBe(200);
+
+    mocks.projectFindUnique.mockImplementation(async (args: { include?: unknown; select?: unknown }) =>
+      args.include
+        ? makeProject()
+        : {
+          status: 'ACTIVE', startDate: null, dueDate: null,
+          workspace: { orgId, archivedAt: null },
+          members: [{ id: 'pm-a', role: 'MEMBER' }],
+        },
+    );
+    const memberUpdate = await supertest(app)
+      .patch(`/api/projects/${projectId}`)
+      .set('Authorization', 'Bearer session-a')
+      .send({ name: 'Member update' });
+    expect(memberUpdate.status).toBe(403);
+  });
+
+  it('preserves date ordering against unchanged persisted dates and blocks archived-project writes', async () => {
+    mocks.orgMemberFindUnique.mockResolvedValue({ id: 'om-a', orgId, userId, role: 'MANAGER' });
+    mocks.projectFindUnique.mockImplementation(async (args: { include?: unknown; select?: unknown }) => {
+      if (args.include) return makeProject({ dueDate: new Date('2026-10-25T00:00:00.000Z') });
+      if (args.select) return {
+        status: 'ACTIVE',
+        startDate: null,
+        dueDate: new Date('2026-10-25T00:00:00.000Z'),
+        workspace: { orgId },
+        members: [],
+      };
+      return null;
+    });
+    const invalidUpdate = await supertest(app)
+      .patch(`/api/projects/${projectId}`)
+      .set('Authorization', 'Bearer session-a')
+      .send({ startDate: '2026-11-01T00:00:00.000Z' });
+    expect(invalidUpdate.status).toBe(400);
+    expect(mocks.projectUpdate).not.toHaveBeenCalled();
+
+    mocks.projectFindUnique.mockResolvedValue({
+      status: 'ARCHIVED',
+      workspace: { orgId, archivedAt: null },
+      members: [],
+    });
+    const archivedUpdate = await supertest(app)
+      .patch(`/api/projects/${projectId}`)
+      .set('Authorization', 'Bearer session-a')
+      .send({ name: 'Blocked' });
+    expect(archivedUpdate.status).toBe(409);
+    expect(mocks.projectUpdate).not.toHaveBeenCalled();
+  });
+
+  it('returns an error when OWNER membership creation fails inside the transaction callback', async () => {
+    mocks.orgMemberFindUnique.mockResolvedValue({ id: 'om-a', orgId, userId, role: 'MANAGER' });
+    mocks.projectMemberCreate.mockRejectedValue(new Error('membership insert failed'));
+
+    const response = await supertest(app)
+      .post(`/api/workspaces/${workspaceId}/projects`)
+      .set('Authorization', 'Bearer session-a')
+      .send(validProject);
+
+    expect(response.status).toBe(500);
+    expect(mocks.projectCreate).toHaveBeenCalledOnce();
+    expect(mocks.projectMemberCreate).toHaveBeenCalledOnce();
+    expect(mocks.projectFindUnique).not.toHaveBeenCalledWith(expect.objectContaining({ include: expect.anything() }));
+  });
+
+  it('returns conflict when serializable transaction retries are exhausted', async () => {
+    mocks.orgMemberFindUnique.mockResolvedValue({ id: 'om-a', orgId, userId, role: 'MANAGER' });
+    mocks.transaction.mockRejectedValue({ code: 'P2034' });
+
+    const response = await supertest(app)
+      .post(`/api/workspaces/${workspaceId}/projects`)
+      .set('Authorization', 'Bearer session-a')
+      .send(validProject);
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('CONFLICT');
   });
 });
 

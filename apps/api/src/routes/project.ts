@@ -1,6 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import type { OrganizationMember, Workspace } from '@prisma/client';
-import { addProjectMemberSchema, projectListQuerySchema } from '@qveto/shared';
+import { addProjectMemberSchema, createProjectSchema, projectListQuerySchema, updateProjectSchema } from '@qveto/shared';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
@@ -50,6 +50,15 @@ async function requireWorkspaceAccess(req: Request, _res: Response, next: NextFu
   }
 }
 
+function requireWorkspaceManager(req: Request, _res: Response, next: NextFunction): void {
+  const membership = (req as WorkspaceRequest).orgMembership;
+  if (membership.role !== 'OWNER' && membership.role !== 'MANAGER') {
+    next(new AppError(403, 'FORBIDDEN', 'Only organization Owners and Managers may create projects'));
+    return;
+  }
+  next();
+}
+
 async function requireProjectAccess(req: Request, _res: Response, next: NextFunction): Promise<void> {
   try {
     const project = await prisma.project.findUnique({
@@ -92,7 +101,7 @@ function requireProjectManager(req: Request, _res: Response, next: NextFunction)
   const scopedReq = req as ProjectAccessRequest;
   const canManageOrganization = scopedReq.orgMembership.role === 'OWNER' || scopedReq.orgMembership.role === 'MANAGER';
   if (!canManageOrganization && scopedReq.projectMemberRole !== 'OWNER') {
-    next(new AppError(403, 'FORBIDDEN', 'Only organization Owners, Managers, or the project Owner may manage membership'));
+    next(new AppError(403, 'FORBIDDEN', 'Only organization Owners, Managers, or the project Owner may manage this project'));
     return;
   }
   next();
@@ -107,6 +116,14 @@ function requireActiveProject(req: Request, _res: Response, next: NextFunction):
 }
 
 const projectRouter: ReturnType<typeof Router> = Router();
+
+projectRouter.post('/workspaces/:workspaceId/projects', requireAuth, requireWorkspaceAccess, requireWorkspaceManager, async (req, res, next) => {
+  try {
+    const input = createProjectSchema.parse(req.body);
+    const project = await projectService.create(routeParam(req, 'workspaceId'), input);
+    res.status(201).json({ project });
+  } catch (error) { next(error); }
+});
 
 projectRouter.get('/workspaces/:workspaceId/projects', requireAuth, requireWorkspaceAccess, async (req, res, next) => {
   try {
@@ -127,6 +144,14 @@ projectRouter.get('/workspaces/:workspaceId/projects', requireAuth, requireWorks
 projectRouter.get('/projects/:projectId', requireAuth, requireProjectAccess, async (req, res, next) => {
   try {
     res.status(200).json({ project: await projectService.get(routeParam(req, 'projectId')) });
+  } catch (error) { next(error); }
+});
+
+projectRouter.patch('/projects/:projectId', requireAuth, requireProjectAccess, requireProjectManager, requireActiveProject, async (req, res, next) => {
+  try {
+    const input = updateProjectSchema.parse(req.body);
+    const project = await projectService.update(routeParam(req, 'projectId'), input);
+    res.status(200).json({ project });
   } catch (error) { next(error); }
 });
 

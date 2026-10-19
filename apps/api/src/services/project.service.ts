@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/errorHandler.js';
+import type { CreateProjectInput, UpdateProjectInput } from '@qveto/shared';
 
 const projectInclude = {
   members: {
@@ -17,23 +18,22 @@ type ProjectWithOwnerMembership = Prisma.ProjectGetPayload<{ include: typeof pro
 type ProjectMemberWithUser = Prisma.ProjectMemberGetPayload<{ include: typeof projectMemberInclude }>;
 
 function serializeProject(project: ProjectWithOwnerMembership) {
-  // The current schema has no Project.ownerId or project date columns. Derive
-  // an owner only when exactly one explicit OWNER membership exists; never
-  // choose arbitrarily if legacy membership data is inconsistent.
-  const ownerId = project.members.length === 1 ? project.members[0]?.userId ?? null : null;
-
   return {
     id: project.id,
     name: project.name,
     description: project.description,
     status: project.status,
-    startDate: null,
-    dueDate: null,
-    ownerId,
+    startDate: project.startDate?.toISOString() ?? null,
+    dueDate: project.dueDate?.toISOString() ?? null,
+    ownerId: project.ownerId,
     workspaceId: project.workspaceId,
     createdAt: project.createdAt.toISOString(),
     updatedAt: project.updatedAt.toISOString(),
   };
+}
+
+function isPrismaTransactionConflict(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034';
 }
 
 function serializeMember(member: ProjectMemberWithUser) {
@@ -48,6 +48,113 @@ function serializeMember(member: ProjectMemberWithUser) {
 }
 
 export class ProjectService {
+  async create(workspaceId: string, input: CreateProjectInput) {
+    let projectId: string;
+    try {
+      projectId = await prisma.$transaction(async (tx) => {
+        const workspace = await tx.workspace.findUnique({
+          where: { id: workspaceId },
+          select: { id: true, orgId: true, archivedAt: true },
+        });
+        if (!workspace) throw new AppError(404, 'NOT_FOUND', 'Workspace not found');
+        if (workspace.archivedAt) throw new AppError(409, 'CONFLICT', 'Archived workspaces cannot receive projects');
+
+        const ownerMembership = await tx.organizationMember.findUnique({
+          where: { userId_orgId: { userId: input.ownerId, orgId: workspace.orgId } },
+          select: { id: true },
+        });
+        if (!ownerMembership) {
+          throw new AppError(400, 'BAD_REQUEST', 'Project owner must belong to the workspace organization');
+        }
+
+        const project = await tx.project.create({
+          data: {
+            workspace: { connect: { id: workspaceId } },
+            name: input.name,
+            description: input.description ?? null,
+            status: input.status,
+            startDate: input.startDate ?? null,
+            dueDate: input.dueDate ?? null,
+            owner: { connect: { id: input.ownerId } },
+          },
+          select: { id: true },
+        });
+        await tx.projectMember.create({
+          data: { projectId: project.id, userId: input.ownerId, role: 'OWNER' },
+        });
+        return project.id;
+      }, { isolationLevel: 'Serializable' });
+    } catch (error) {
+      if (isPrismaTransactionConflict(error)) {
+        throw new AppError(409, 'CONFLICT', 'Project changed while it was being created. Retry the request.');
+      }
+      throw error;
+    }
+    return this.get(projectId);
+  }
+
+  async update(projectId: string, input: UpdateProjectInput) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        const project = await tx.project.findUnique({
+          where: { id: projectId },
+          select: {
+            status: true,
+            startDate: true,
+            dueDate: true,
+            workspace: { select: { orgId: true } },
+          },
+        });
+        if (!project) throw new AppError(404, 'NOT_FOUND', 'Project not found');
+        if (project.status === 'ARCHIVED') throw new AppError(409, 'CONFLICT', 'Archived projects cannot be modified');
+
+        const startDate = input.startDate === undefined ? project.startDate : input.startDate;
+        const dueDate = input.dueDate === undefined ? project.dueDate : input.dueDate;
+        if (startDate && dueDate && startDate > dueDate) {
+          throw new AppError(400, 'VALIDATION_ERROR', 'startDate must be before or equal to dueDate');
+        }
+
+        const data: Prisma.ProjectUpdateInput = {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.startDate !== undefined ? { startDate: input.startDate } : {}),
+          ...(input.dueDate !== undefined ? { dueDate: input.dueDate } : {}),
+          ...(input.ownerId !== undefined ? { owner: { connect: { id: input.ownerId } } } : {}),
+        };
+
+        if (input.ownerId !== undefined) {
+          const ownerMembership = await tx.organizationMember.findUnique({
+            where: { userId_orgId: { userId: input.ownerId, orgId: project.workspace.orgId } },
+            select: { id: true },
+          });
+          if (!ownerMembership) {
+            throw new AppError(400, 'BAD_REQUEST', 'Project owner must belong to the project organization');
+          }
+
+          // Retain the prior owner's project access while keeping a single OWNER role.
+          await tx.projectMember.updateMany({
+            where: { projectId, role: 'OWNER', userId: { not: input.ownerId } },
+            data: { role: 'MEMBER' },
+          });
+          await tx.projectMember.upsert({
+            where: { userId_projectId: { userId: input.ownerId, projectId } },
+            create: { projectId, userId: input.ownerId, role: 'OWNER' },
+            update: { role: 'OWNER' },
+          });
+        }
+
+        await tx.project.update({ where: { id: projectId }, data });
+      }, { isolationLevel: 'Serializable' });
+    } catch (error) {
+      if (isPrismaTransactionConflict(error)) {
+        throw new AppError(409, 'CONFLICT', 'Project changed while it was being updated. Retry the request.');
+      }
+      throw error;
+    }
+    return this.get(projectId);
+  }
+
   async list(workspaceId: string, userId: string, canManage: boolean, page: number, pageSize: number, includeArchived: boolean) {
     const where: Prisma.ProjectWhereInput = {
       workspaceId,

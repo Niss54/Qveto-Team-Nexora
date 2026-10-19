@@ -5,9 +5,8 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { api, ApiClientError } from '@/lib/api-client';
-import type { OrgMemberResponse, ProjectMemberResponse, ProjectResponse, WorkspaceResponse } from '@qveto/shared';
+import { updateProjectSchema, type OrgMemberResponse, type ProjectMemberResponse, type ProjectResponse, type ProjectStatus, type WorkspaceResponse } from '@qveto/shared';
 
-type ProjectStatus = 'PLANNING' | 'ACTIVE' | 'ON_HOLD' | 'COMPLETED';
 type ProjectDetailResponse = { project: ProjectResponse };
 type MemberListResponse = { members: ProjectMemberResponse[] };
 type OrgMembersResponse = { data?: OrgMemberResponse[]; members?: OrgMemberResponse[] };
@@ -30,6 +29,9 @@ export default function ProjectDetailPage() {
   const [orgMembers, setOrgMembers] = useState<OrgMemberResponse[]>([]);
   const [selectedMember, setSelectedMember] = useState('');
   const [status, setStatus] = useState<string>('ACTIVE');
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [ownerId, setOwnerId] = useState('');
   const [startDate, setStartDate] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [loading, setLoading] = useState(true);
@@ -52,17 +54,20 @@ export default function ProjectDetailPage() {
     setError(null);
     try {
       const result = await api.get<ProjectDetailResponse>(`/api/projects/${encodeURIComponent(projectId)}`);
-      const [workspaceResult, memberResult, orgMemberResult] = await Promise.all([
+      const [workspaceResult, memberResult] = await Promise.all([
         api.get<{ workspace: WorkspaceResponse }>(`/api/workspaces/${encodeURIComponent(result.project.workspaceId)}`),
         api.get<MemberListResponse>(`/api/projects/${encodeURIComponent(projectId)}/members`),
-        api.get<OrgMembersResponse>(`/api/organizations/${encodeURIComponent(currentOrg.id)}/members`),
       ]);
+      const orgMemberResult = await api.get<OrgMembersResponse>(`/api/organizations/${encodeURIComponent(workspaceResult.workspace.orgId)}/members`);
       const availableOrgMembers = Array.isArray(orgMemberResult.data) ? orgMemberResult.data : orgMemberResult.members ?? [];
       setProject(result.project);
       setWorkspace(workspaceResult.workspace);
       setMembers(memberResult.members);
       setOrgMembers(availableOrgMembers);
       setStatus(result.project.status);
+      setName(result.project.name);
+      setDescription(result.project.description ?? '');
+      setOwnerId(result.project.ownerId ?? '');
       setStartDate(dateValue(result.project.startDate));
       setDueDate(dateValue(result.project.dueDate));
       setSelectedMember((current) => current || availableOrgMembers.find((member) => !memberResult.members.some((existing) => existing.userId === member.userId))?.userId || '');
@@ -75,6 +80,45 @@ export default function ProjectDetailPage() {
   }, [projectId, currentOrg]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const saveSettings = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!project) return;
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    const input = {
+      name,
+      description: description.trim() || null,
+      ...(ownerId ? { ownerId } : {}),
+      ...(statuses.includes(status as ProjectStatus) ? { status } : {}),
+      startDate: startDate ? new Date(`${startDate}T00:00:00.000Z`) : null,
+      dueDate: dueDate ? new Date(`${dueDate}T00:00:00.000Z`) : null,
+    };
+    const parsed = updateProjectSchema.safeParse(input);
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Check the project details and try again.');
+      setSaving(false);
+      return;
+    }
+    try {
+      const result = await api.patch<ProjectDetailResponse>(
+        `/api/projects/${encodeURIComponent(project.id)}`,
+        {
+          ...parsed.data,
+          startDate: parsed.data.startDate?.toISOString() ?? null,
+          dueDate: parsed.data.dueDate?.toISOString() ?? null,
+        },
+      );
+      setProject(result.project);
+      setNotice('Project settings saved.');
+      await load();
+    } catch (saveError) {
+      setError(errorMessage(saveError, 'Could not save project settings.'));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const setArchived = async (archive: boolean) => {
     if (!project) return;
@@ -148,31 +192,35 @@ export default function ProjectDetailPage() {
       {isArchived && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">This project is archived. Existing task data remains available; changes are disabled until it is restored.</p>}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-        <section className="card grid gap-4 p-5 sm:grid-cols-2">
+        <form onSubmit={saveSettings} className="card grid gap-4 p-5 sm:grid-cols-2">
           <h2 className="text-base font-semibold text-gray-900 sm:col-span-2">Project details</h2>
-          {canManage && <p className="text-sm text-gray-600 sm:col-span-2">Settings editing is waiting for the coordinated Project persistence changes. Existing values, including legacy statuses, are shown without modification.</p>}
+          {canManage && !isArchived && <p className="text-sm text-gray-600 sm:col-span-2">Changing the owner also updates the Project Owner membership. Existing legacy statuses are preserved unless you select a supported status.</p>}
           <label className="space-y-1 text-sm font-medium text-gray-700">Name
-            <input className="input-field w-full" value={project.name} readOnly disabled />
+            <input className="input-field w-full" value={name} onChange={(event) => setName(event.target.value)} maxLength={100} readOnly={!canManage || isArchived} required />
           </label>
           <label className="space-y-1 text-sm font-medium text-gray-700">Owner
-            <input className="input-field w-full" value={project.ownerId ? orgMembers.find((member) => member.userId === project.ownerId)?.user.name ?? project.ownerId : 'No owner assigned (legacy project)'} readOnly disabled />
+            <select className="input-field w-full" value={ownerId} onChange={(event) => setOwnerId(event.target.value)} disabled={!canManage || isArchived}>
+              {!ownerId && <option value="">No owner assigned (legacy project)</option>}
+              {orgMembers.map((member) => <option key={member.userId} value={member.userId}>{member.user.name}</option>)}
+            </select>
           </label>
           <label className="space-y-1 text-sm font-medium text-gray-700 sm:col-span-2">Description
-            <textarea className="input-field min-h-20 w-full" value={project.description ?? ''} readOnly disabled />
+            <textarea className="input-field min-h-20 w-full" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} readOnly={!canManage || isArchived} />
           </label>
           <label className="space-y-1 text-sm font-medium text-gray-700">Status
-            <select className="input-field w-full" value={status} disabled>
+            <select className="input-field w-full" value={status} onChange={(event) => setStatus(event.target.value)} disabled={!canManage || isArchived}>
               {!statuses.includes(status as ProjectStatus) && <option value={status}>Existing legacy status: {status}</option>}
               {statuses.map((value) => <option key={value} value={value}>{value.replace('_', ' ')}</option>)}
             </select>
           </label>
           <label className="space-y-1 text-sm font-medium text-gray-700">Start date
-            <input className="input-field w-full" type="date" value={startDate} readOnly disabled />
+            <input className="input-field w-full" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} readOnly={!canManage || isArchived} />
           </label>
           <label className="space-y-1 text-sm font-medium text-gray-700">Due date
-            <input className="input-field w-full" type="date" value={dueDate} readOnly disabled />
+            <input className="input-field w-full" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} readOnly={!canManage || isArchived} />
           </label>
-        </section>
+          {canManage && !isArchived && <div className="sm:col-span-2"><button className="btn-primary text-sm" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button></div>}
+        </form>
 
         <section className="card space-y-4 p-5">
           <div>
