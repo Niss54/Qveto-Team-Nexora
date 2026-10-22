@@ -492,16 +492,16 @@ Removes an existing team membership.
 
 ### 6.6 Projects (PRD 02)
 
-This contract is being implemented incrementally. The current API exposes the workspace project list, project detail, member roster, member add/remove, and archive/restore operations. Project creation, general settings updates, owner transfer, and Project date persistence require the pending coordinated Prisma schema change and are not available yet.
+The Project API supports workspace-scoped creation and listing, project details and settings, owner transfer, persisted dates, membership management, and explicit archive/restore operations as described below.
 
-Projects belong to a workspace, and their organization is resolved through that workspace. Never trust client-supplied `orgId` or `workspaceId` outside the route. Every operation requires organization membership; project-scoped access also requires project membership unless the caller is an organization `OWNER` or `MANAGER`. An organization `OWNER`/`MANAGER` or the project `OWNER` may manage project settings and membership. Project creation is restricted to organization `OWNER`/`MANAGER`.
+Projects belong to a workspace; the organization is resolved through that workspace. The server does not accept client-supplied `orgId` or `workspaceId` to establish scope. Every operation requires membership in the workspace organization. Project reads additionally require project membership unless the caller is an organization `OWNER` or `MANAGER`. Organization `OWNER`/`MANAGER` roles and the project's `OWNER` may manage project settings and membership, and may archive or restore projects. Project creation requires an organization `OWNER` or `MANAGER`.
 
-New projects require `ownerId` for an existing member of the workspace organization. Creation transactionally stores the project and a matching `ProjectMember` with role `OWNER`. Changing the owner transactionally keeps the owner membership in sync. Existing ownerless projects remain readable and are never assigned an owner automatically; any later owner assignment is explicit.
+Creation requires an explicitly selected `ownerId` belonging to the workspace organization. In one serializable transaction, the API creates the project and its `ProjectMember` with role `OWNER`. On an owner change, the API verifies the selected user is an organization member, updates the project owner, demotes prior `OWNER` memberships to `MEMBER`, and promotes or creates the selected owner's `OWNER` membership in one transaction. Successful create/transfer operations therefore leave exactly one `OWNER` membership; persistence tests verify transfer and rollback behavior. Legacy ownerless projects remain readable, and the migration does not assign owners automatically.
 
-The accepted statuses are `PLANNING`, `ACTIVE`, `ON_HOLD`, `COMPLETED`, and `ARCHIVED`. Create/update requests may set the first four; archive and restore use dedicated operations. Legacy status strings are preserved and returned until explicitly reconciled. Dates are optional; when both `startDate` and `dueDate` are supplied, `startDate` must be on or before `dueDate`.
+Writable project statuses are `PLANNING`, `ACTIVE`, `ON_HOLD`, and `COMPLETED`; creation defaults to `ACTIVE`. `ARCHIVED` is set only through the archive operation and cannot be sent in create/update requests. Project responses expose `status` as a string so legacy status values remain readable. `startDate` and `dueDate` are optional and nullable; clients should send valid ISO 8601 date/time strings, which are parsed and persisted as dates and serialized as ISO strings in responses. Sending `null` clears a date. For create and update, the effective start date must be on or before the effective due date when both are set, including when one value comes from the existing record.
 
 #### `GET /api/workspaces/:workspaceId/projects`
-Lists projects in a workspace the caller may access, using `{ data, meta }` pagination. Organization `OWNER`/`MANAGER` roles see all projects in the workspace; other users see only projects where they are project members. Visibility of archived workspaces follows the existing Workspace API rule: only organization `OWNER`/`MANAGER` roles may view them.
+Lists projects in a workspace the caller may access, using `{ data, meta }` pagination. Organization `OWNER`/`MANAGER` roles see all projects in the workspace; other users see only projects where they are project members. Users with the organization `EMPLOYEE` role cannot access projects in an archived workspace; organization `OWNER`/`MANAGER` roles can.
 - **Auth:** Required; workspace organization membership is verified server-side.
 - **Query:** `page` (default `1`), `pageSize` (default `20`, maximum `100`), `includeArchived` (default `false`). Archived projects are excluded unless explicitly requested; membership visibility remains enforced.
 - **Response (200 OK):** `{ "data": [Project], "meta": { "total": 0, "page": 1, "pageSize": 20, "totalPages": 0 } }`
@@ -509,33 +509,33 @@ Lists projects in a workspace the caller may access, using `{ data, meta }` pagi
 #### `POST /api/workspaces/:workspaceId/projects`
 Creates a project in an active workspace.
 - **Auth:** Required (`OWNER` or `MANAGER` in the workspace organization).
-- **Body:** `name` (required, trimmed, maximum 100 characters), `ownerId` (required organization member), `description` (optional, nullable, maximum 500 characters), `status` (optional; defaults to `ACTIVE`), optional nullable `startDate` and `dueDate`. The workspace and organization are taken from the route and server-side relationships.
+- **Body:** `name` (required, trimmed, 1–100 characters), `ownerId` (required organization member), `description` (optional, nullable, trimmed, maximum 500 characters), `status` (optional; defaults to `ACTIVE` and accepts the writable statuses above), and optional nullable `startDate` and `dueDate` ISO 8601 strings. The workspace and organization are taken from the route and server-side relationships.
 - **Response (201 Created):** `{ "project": Project }`
-- Archived workspaces cannot receive projects.
+- Archived workspaces cannot receive projects (`409 CONFLICT`). A selected owner outside the workspace organization is rejected (`400 BAD_REQUEST`).
 
 #### `GET /api/projects/:projectId`
-Returns an authorized project, including archived projects and legacy ownerless projects.
+Returns an authorized project, including archived projects and legacy ownerless projects. A project in an archived workspace remains hidden from organization `EMPLOYEE` users.
 - **Auth:** Required; caller must be an organization member and either a project member or organization `OWNER`/`MANAGER`.
 - **Response (200 OK):** `{ "project": Project }`
 
 #### `PATCH /api/projects/:projectId`
-Updates project name, description, status, owner, or dates. Empty bodies are invalid. `ARCHIVED` cannot be set here; restore is explicit. Owner changes verify organization membership and synchronize the `OWNER` project membership in one transaction.
+Updates `name`, `description`, `status`, `ownerId`, `startDate`, and/or `dueDate`; fields are optional, unknown fields are rejected, and an empty body is invalid. `ARCHIVED` cannot be set here; use the archive/restore operations. Owner changes verify organization membership and synchronize owner and membership records in one transaction. The date-range rule also applies against any unchanged date already stored.
 - **Auth:** Required (organization `OWNER`/`MANAGER` or current project `OWNER`).
 - **Response (200 OK):** `{ "project": Project }`
 - Archived projects reject settings and membership changes with `409 CONFLICT`.
 
 #### `POST /api/projects/:projectId/archive` and `POST /api/projects/:projectId/restore`
-Archive sets `status` to `ARCHIVED` without deleting project, task, or membership history. Restore is explicit and uses `ACTIVE` as the restore status because the current schema does not retain the previous status.
+Archive sets `status` to `ARCHIVED` without deleting the project, its tasks, or its membership history. Authorized project details and member-roster reads remain available for archived projects in active workspaces, while project settings and membership writes return `409 CONFLICT`. Restore is explicit and sets status to `ACTIVE`, because the schema does not retain the previous status. Restoring a project that is not archived returns `409 CONFLICT`.
 - **Auth:** Required (organization `OWNER`/`MANAGER` or current project `OWNER`).
 - **Response (200 OK):** `{ "project": Project }`
 
 #### `GET /api/projects/:projectId/members`, `POST /api/projects/:projectId/members`, and `DELETE /api/projects/:projectId/members/:userId`
-Lists the roster, adds an organization member, or removes a non-owner membership. A project owner cannot be removed without first transferring ownership; the owner always has a `ProjectMember` record with role `OWNER`.
+Lists the roster, adds an organization member, or removes a non-owner membership. Add creates a `MEMBER` record. A project `OWNER` cannot be removed directly (`409 CONFLICT`); first transfer ownership, which demotes the previous owner to `MEMBER` while retaining project access. Create and transfer endpoints maintain the matching `OWNER` membership transactionally; legacy ownerless projects are not backfilled automatically.
 - **Auth:** Reads require organization and project access; changes require organization `OWNER`/`MANAGER` or current project `OWNER`.
 - **Add body:** `{ "userId": string }`; the user must belong to the project organization.
-- **Responses:** `GET` returns `{ "members": [ProjectMember] }`; add/remove return `{ "project": Project }`.
+- **Responses:** `GET` returns `{ "members": [ProjectMember] }`; add returns `201 Created` with `{ "project": Project }`; remove returns `200 OK` with `{ "project": Project }`.
 
-`Project` contains `id`, `name`, nullable `description`, `status`, nullable `startDate`/`dueDate`, nullable `ownerId` for legacy rows, `workspaceId`, `createdAt`, and `updatedAt`. `ProjectMember` contains `id`, `userId`, `projectId`, `role`, `joinedAt`, and a safe user summary (`id`, `name`, `email`). Invalid data returns `400 VALIDATION_ERROR`; missing records return `404 NOT_FOUND`; cross-organization or unauthorized access returns `403 FORBIDDEN`; archived-project mutation and duplicate membership return `409 CONFLICT`.
+`Project` contains `id`, `name`, nullable `description`, string `status`, nullable `startDate`/`dueDate`, nullable `ownerId` for legacy rows, `workspaceId`, `createdAt`, and `updatedAt`. `ProjectMember` contains `id`, `userId`, `projectId`, `role`, `joinedAt`, and a safe user summary (`id`, `name`, `email`). Errors use the standard `{ "error": { "code", "message", "details?", "requestId?" } }` envelope. Request-schema and date validation errors return `400 VALIDATION_ERROR`; a selected owner or added member outside the organization returns `400 BAD_REQUEST`; missing records return `404 NOT_FOUND`; cross-organization access, missing required project membership, or insufficient role returns `403 FORBIDDEN`; archived-workspace project creation, archived-project settings/membership writes, duplicate membership, direct owner removal, and restoring a non-archived project return `409 CONFLICT`.
 
 ### 6.7 Tasks & Lifecycle Management (PRD 03 Contract)
 
