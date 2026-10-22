@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -34,6 +34,7 @@ export default function ProjectsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const ownerOrganizationId = useRef<string | null>(null);
 
   const canCreate = currentOrg?.role === 'OWNER' || currentOrg?.role === 'MANAGER';
 
@@ -69,10 +70,8 @@ export default function ProjectsPage() {
         const members = await api.get<OrgMembersResponse>(`/api/organizations/${encodeURIComponent(currentOrg.id)}/members`);
         const availableMembers = Array.isArray(members.data) ? members.data : members.members ?? [];
         setOrgMembers(availableMembers);
-        setOwnerId('');
       } else {
         setOrgMembers([]);
-        setOwnerId('');
       }
       setWorkspaceId((current) => current && visibleWorkspaces.some((workspace) => workspace.id === current && !workspace.archivedAt)
         ? current
@@ -129,6 +128,7 @@ export default function ProjectsPage() {
       });
       setName('');
       setDescription('');
+      setOwnerId('');
       setStartDate('');
       setDueDate('');
       setStatus('ACTIVE');
@@ -141,7 +141,14 @@ export default function ProjectsPage() {
     }
   };
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const nextOrganizationId = currentOrg?.id ?? null;
+    if (ownerOrganizationId.current !== nextOrganizationId) {
+      ownerOrganizationId.current = nextOrganizationId;
+      setOwnerId('');
+    }
+    void load();
+  }, [currentOrg?.id, load]);
 
   if (authLoading || !user) {
     return <div className="mx-auto max-w-5xl p-8 text-center text-gray-500">Loading projects…</div>;
