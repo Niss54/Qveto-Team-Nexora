@@ -350,3 +350,125 @@ export interface PaginatedResponse<T> {
   data: T[];
   meta: PaginationMeta;
 }
+
+// ============================================================
+// Collaboration & Notifications Schemas (PRD 04)
+// ============================================================
+
+export const createCommentSchema = z
+  .object({
+    content: z
+      .string()
+      .trim()
+      .min(1, 'Comment cannot be empty')
+      .max(5000, 'Comment too long (max 5000 characters)'),
+  })
+  .strict();
+export type CreateCommentInput = z.infer<typeof createCommentSchema>;
+
+export const updateCommentSchema = z
+  .object({
+    content: z
+      .string()
+      .trim()
+      .min(1, 'Comment cannot be empty')
+      .max(5000, 'Comment too long (max 5000 characters)'),
+  })
+  .strict();
+export type UpdateCommentInput = z.infer<typeof updateCommentSchema>;
+
+export const commentResponseSchema = z.object({
+  id: z.string(),
+  content: z.string(),
+  taskId: z.string(),
+  authorId: z.string(),
+  author: userResponseSchema.optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type CommentResponse = z.infer<typeof commentResponseSchema>;
+
+export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+
+export const ALLOWED_ATTACHMENT_MIME_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+  'text/plain',
+  'text/csv',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/zip',
+] as const;
+
+export const attachmentResponseSchema = z.object({
+  id: z.string(),
+  fileName: z.string(),
+  fileSize: z.number(),
+  mimeType: z.string(),
+  taskId: z.string(),
+  uploadedById: z.string(),
+  uploadedBy: userResponseSchema.optional(),
+  createdAt: z.string(),
+});
+export type AttachmentResponse = z.infer<typeof attachmentResponseSchema>;
+
+export const NotificationType = z.enum([
+  'TASK_ASSIGNED',
+  'TASK_OVERDUE',
+  'COMMENT_ADDED',
+  'TASK_STATUS_CHANGED',
+  'TASK_DUE_DATE_CHANGED',
+]);
+export type NotificationType = z.infer<typeof NotificationType>;
+
+export const notificationResponseSchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  title: z.string(),
+  message: z.string(),
+  isRead: z.boolean(),
+  userId: z.string(),
+  orgId: z.string(),
+  relatedEntityType: z.string().nullable().optional(),
+  relatedEntityId: z.string().nullable().optional(),
+  createdAt: z.string(),
+});
+export type NotificationResponse = z.infer<typeof notificationResponseSchema>;
+
+export const notificationListQuerySchema = z
+  .object({
+    page: z.coerce.number().int().positive().default(1),
+    pageSize: z.coerce.number().int().positive().max(100).default(20),
+    unreadOnly: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((val) => val === 'true'),
+  })
+  .strict();
+export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;
+
+export const CollaborationActivityType = z.enum([
+  'COMMENT_ADDED',
+  'COMMENT_DELETED',
+  'ATTACHMENT_UPLOADED',
+  'ATTACHMENT_DELETED',
+]);
+export type CollaborationActivityType = z.infer<typeof CollaborationActivityType>;
+
+export const activityEventResponseSchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  entityType: z.string(),
+  entityId: z.string(),
+  actorId: z.string(),
+  orgId: z.string(),
+  metadata: z.record(z.any()).nullable().optional(),
+  createdAt: z.string(),
+  actor: userResponseSchema.optional(),
+});
+export type ActivityEventResponse = z.infer<typeof activityEventResponseSchema>;

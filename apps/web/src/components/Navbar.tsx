@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { RoleBadge } from './RoleBadge';
 import { CreateOrgModal } from './CreateOrgModal';
+import { NotificationBell } from './NotificationBell';
 
 export function Navbar() {
   const router = useRouter();
@@ -107,12 +108,13 @@ export function Navbar() {
               )}
             </div>
 
-            {/* Right: Auth State / User Profile */}
+            {/* Right: Auth State / User Profile & Notifications */}
             <div className="flex items-center gap-4">
               {loading ? (
                 <div className="w-8 h-8 rounded-full bg-gray-200 animate-pulse" />
               ) : user ? (
                 <div className="flex items-center gap-3">
+                  <NotificationBell />
                   <div className="text-right hidden sm:block">
                     <p className="text-sm font-semibold text-gray-900 leading-none">{user.name}</p>
                     <p className="text-xs text-gray-500 leading-tight mt-0.5">{user.email}</p>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type DragEvent, type FormEvent } from
 import { useRouter } from 'next/navigation';
 import { api, ApiClientError } from '@/lib/api-client';
 import { useAuth } from '@/context/AuthContext';
+import { TaskCollaborationTabs } from '@/components/TaskCollaborationTabs';
 
 type Status = 'TODO' | 'IN_PROGRESS' | 'IN_REVIEW' | 'DONE';
 type Priority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
@@ -538,6 +539,7 @@ export default function TasksPage() {
             {subtasks.map((task) => <p key={task.id} className="rounded bg-gray-50 p-2 text-sm">{task.title} <span className="text-xs text-gray-500">({names[task.status]})</span></p>)}
             <form onSubmit={createSubtask} className="flex gap-2"><input className="input-field flex-1" value={subtaskTitle} onChange={(e) => setSubtaskTitle(e.target.value)} placeholder="Subtask title" aria-label="Subtask title" /><button className="btn-primary" disabled={busy}>Add</button></form>
           </div>
+                  <TaskCollaborationTabs taskId={selected.id} />
         </aside>
       </div>}
     </main>

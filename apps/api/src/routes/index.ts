@@ -4,3 +4,7 @@ export { organizationRouter } from './organization.js';
 export { workspaceRouter } from './workspace.js';
 export { teamRouter } from './team.js';
 export { projectRouter } from './project.js';
+export { commentsRouter } from './comments.js';
+export { attachmentsRouter } from './attachments.js';
+export { activityRouter } from './activity.js';
+export { notificationsRouter } from './notifications.js';

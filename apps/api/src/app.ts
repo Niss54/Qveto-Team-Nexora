@@ -12,7 +12,18 @@ import {
   errorHandler,
   notFoundHandler,
 } from './middleware/index.js';
-import { healthRouter, authRouter, organizationRouter, workspaceRouter, teamRouter, projectRouter } from './routes/index.js';
+import {
+  healthRouter,
+  authRouter,
+  organizationRouter,
+  workspaceRouter,
+  teamRouter,
+  projectRouter,
+  commentsRouter,
+  attachmentsRouter,
+  activityRouter,
+  notificationsRouter,
+} from './routes/index.js';
 
 /**
  * Creates and configures the Express application.
@@ -56,6 +67,10 @@ export function createApp(corsOrigin: string = 'http://localhost:3000'): express
   app.use('/api/projects/:projectId/labels', projectLabelsRouter);
   app.use('/api/tasks/:taskId/labels', taskLabelsRouter);
   app.use('/api/projects/:projectId/kanban', kanbanRouter);
+  app.use('/api/tasks/:taskId/comments', commentsRouter);
+  app.use('/api/tasks/:taskId/attachments', attachmentsRouter);
+  app.use('/api/tasks/:taskId/activity', activityRouter);
+  app.use('/api/notifications', notificationsRouter);
   app.use('/api/tasks/:taskId', taskByIdRouter);
 
   // 404 handler
