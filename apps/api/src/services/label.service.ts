@@ -10,7 +10,7 @@ export class LabelService {
   private async authorizeProject(projectId: string, userId: string) {
     const project = await prisma.project.findUnique({
       where: { id: projectId },
-      select: { workspace: { select: { orgId: true } } },
+      select: { status: true, workspace: { select: { orgId: true } } },
     });
     if (!project) throw new AppError(404, 'NOT_FOUND', 'Project not found');
 
@@ -26,7 +26,13 @@ export class LabelService {
     if (!organizationMember || !projectMember) {
       throw new AppError(403, 'FORBIDDEN', 'You do not have access to this project');
     }
-    return orgId;
+    return { orgId, status: project.status };
+  }
+
+  private ensureProjectActive(status: string): void {
+    if (status === 'ARCHIVED') {
+      throw new AppError(409, 'CONFLICT', 'Archived projects cannot be modified');
+    }
   }
 
   private async authorizeTask(taskId: string, userId: string) {
@@ -37,12 +43,12 @@ export class LabelService {
     if (!task || task.archivedAt) {
       throw new AppError(404, 'NOT_FOUND', 'Task not found');
     }
-    const orgId = await this.authorizeProject(task.projectId, userId);
-    return { task, orgId };
+    const projectAccess = await this.authorizeProject(task.projectId, userId);
+    return { task, ...projectAccess };
   }
 
   async listProjectLabels(projectId: string, userId: string) {
-    const orgId = await this.authorizeProject(projectId, userId);
+    const { orgId } = await this.authorizeProject(projectId, userId);
     const labels = await prisma.label.findMany({
       where: { orgId },
       orderBy: { name: 'asc' },
@@ -51,7 +57,8 @@ export class LabelService {
   }
 
   async createProjectLabel(projectId: string, userId: string, name: string, color: string) {
-    const orgId = await this.authorizeProject(projectId, userId);
+    const { orgId, status } = await this.authorizeProject(projectId, userId);
+    this.ensureProjectActive(status);
     try {
       return await prisma.label.create({ data: { orgId, name, color } });
     } catch (error) {
@@ -73,7 +80,8 @@ export class LabelService {
   }
 
   async addTaskLabel(taskId: string, userId: string, labelId: string) {
-    const { orgId } = await this.authorizeTask(taskId, userId);
+    const { orgId, status } = await this.authorizeTask(taskId, userId);
+    this.ensureProjectActive(status);
     const label = await prisma.label.findFirst({ where: { id: labelId, orgId } });
     if (!label) throw new AppError(400, 'VALIDATION_ERROR', 'Label must belong to the task organization');
 
@@ -97,7 +105,8 @@ export class LabelService {
   }
 
   async removeTaskLabel(taskId: string, userId: string, labelId: string) {
-    const { orgId } = await this.authorizeTask(taskId, userId);
+    const { orgId, status } = await this.authorizeTask(taskId, userId);
+    this.ensureProjectActive(status);
     const label = await prisma.label.findFirst({ where: { id: labelId, orgId } });
     if (!label) throw new AppError(404, 'NOT_FOUND', 'Label not found');
     const result = await prisma.taskLabel.deleteMany({ where: { taskId, labelId } });

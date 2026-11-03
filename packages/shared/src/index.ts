@@ -235,6 +235,77 @@ export const teamResponseSchema = z.object({
 });
 export type TeamResponse = z.infer<typeof teamResponseSchema>;
 
+// ============================================================
+// Project Schemas (PRD 02)
+// ============================================================
+
+/** Supported Project lifecycle values. */
+export const ProjectStatus = z.enum(['PLANNING', 'ACTIVE', 'ON_HOLD', 'COMPLETED', 'ARCHIVED']);
+export type ProjectStatus = z.infer<typeof ProjectStatus>;
+const writableProjectStatus = z.enum(['PLANNING', 'ACTIVE', 'ON_HOLD', 'COMPLETED']);
+
+const projectDateRange = <T extends z.ZodTypeAny>(schema: T) => schema.refine(
+  (data: { startDate?: Date | null; dueDate?: Date | null }) =>
+    !data.startDate || !data.dueDate || data.startDate <= data.dueDate,
+  { message: 'startDate must be before or equal to dueDate', path: ['dueDate'] },
+);
+
+export const createProjectSchema = projectDateRange(z.object({
+  name: z.string().trim().min(1, 'Project name is required').max(100, 'Project name too long'),
+  description: z.string().trim().max(500, 'Description too long').nullable().optional(),
+  ownerId: z.string().min(1, 'Project owner is required'),
+  status: writableProjectStatus.default('ACTIVE'),
+  startDate: z.coerce.date().nullable().optional(),
+  dueDate: z.coerce.date().nullable().optional(),
+}).strict());
+export type CreateProjectInput = z.infer<typeof createProjectSchema>;
+
+export const updateProjectSchema = projectDateRange(z.object({
+  name: z.string().trim().min(1, 'Project name is required').max(100, 'Project name too long').optional(),
+  description: z.string().trim().max(500, 'Description too long').nullable().optional(),
+  ownerId: z.string().min(1, 'Project owner is required').optional(),
+  status: writableProjectStatus.optional(),
+  startDate: z.coerce.date().nullable().optional(),
+  dueDate: z.coerce.date().nullable().optional(),
+}).strict()).refine((data) => Object.keys(data).length > 0, {
+  message: 'At least one project field must be provided',
+});
+export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
+
+export const projectListQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(20),
+  includeArchived: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+}).strict();
+export type ProjectListQuery = z.infer<typeof projectListQuerySchema>;
+
+export const addProjectMemberSchema = z.object({ userId: z.string().min(1) }).strict();
+export type AddProjectMemberInput = z.infer<typeof addProjectMemberSchema>;
+
+export const projectResponseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  status: z.string(),
+  startDate: z.string().nullable(),
+  dueDate: z.string().nullable(),
+  ownerId: z.string().nullable(),
+  workspaceId: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type ProjectResponse = z.infer<typeof projectResponseSchema>;
+
+export const projectMemberResponseSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  projectId: z.string(),
+  role: z.string(),
+  joinedAt: z.string(),
+  user: z.object({ id: z.string(), name: z.string(), email: z.string() }),
+});
+export type ProjectMemberResponse = z.infer<typeof projectMemberResponseSchema>;
+
 export const taskResponseSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -279,3 +350,125 @@ export interface PaginatedResponse<T> {
   data: T[];
   meta: PaginationMeta;
 }
+
+// ============================================================
+// Collaboration & Notifications Schemas (PRD 04)
+// ============================================================
+
+export const createCommentSchema = z
+  .object({
+    content: z
+      .string()
+      .trim()
+      .min(1, 'Comment cannot be empty')
+      .max(5000, 'Comment too long (max 5000 characters)'),
+  })
+  .strict();
+export type CreateCommentInput = z.infer<typeof createCommentSchema>;
+
+export const updateCommentSchema = z
+  .object({
+    content: z
+      .string()
+      .trim()
+      .min(1, 'Comment cannot be empty')
+      .max(5000, 'Comment too long (max 5000 characters)'),
+  })
+  .strict();
+export type UpdateCommentInput = z.infer<typeof updateCommentSchema>;
+
+export const commentResponseSchema = z.object({
+  id: z.string(),
+  content: z.string(),
+  taskId: z.string(),
+  authorId: z.string(),
+  author: userResponseSchema.optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type CommentResponse = z.infer<typeof commentResponseSchema>;
+
+export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+
+export const ALLOWED_ATTACHMENT_MIME_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+  'text/plain',
+  'text/csv',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/zip',
+] as const;
+
+export const attachmentResponseSchema = z.object({
+  id: z.string(),
+  fileName: z.string(),
+  fileSize: z.number(),
+  mimeType: z.string(),
+  taskId: z.string(),
+  uploadedById: z.string(),
+  uploadedBy: userResponseSchema.optional(),
+  createdAt: z.string(),
+});
+export type AttachmentResponse = z.infer<typeof attachmentResponseSchema>;
+
+export const NotificationType = z.enum([
+  'TASK_ASSIGNED',
+  'TASK_OVERDUE',
+  'COMMENT_ADDED',
+  'TASK_STATUS_CHANGED',
+  'TASK_DUE_DATE_CHANGED',
+]);
+export type NotificationType = z.infer<typeof NotificationType>;
+
+export const notificationResponseSchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  title: z.string(),
+  message: z.string(),
+  isRead: z.boolean(),
+  userId: z.string(),
+  orgId: z.string(),
+  relatedEntityType: z.string().nullable().optional(),
+  relatedEntityId: z.string().nullable().optional(),
+  createdAt: z.string(),
+});
+export type NotificationResponse = z.infer<typeof notificationResponseSchema>;
+
+export const notificationListQuerySchema = z
+  .object({
+    page: z.coerce.number().int().positive().default(1),
+    pageSize: z.coerce.number().int().positive().max(100).default(20),
+    unreadOnly: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((val) => val === 'true'),
+  })
+  .strict();
+export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;
+
+export const CollaborationActivityType = z.enum([
+  'COMMENT_ADDED',
+  'COMMENT_DELETED',
+  'ATTACHMENT_UPLOADED',
+  'ATTACHMENT_DELETED',
+]);
+export type CollaborationActivityType = z.infer<typeof CollaborationActivityType>;
+
+export const activityEventResponseSchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  entityType: z.string(),
+  entityId: z.string(),
+  actorId: z.string(),
+  orgId: z.string(),
+  metadata: z.record(z.any()).nullable().optional(),
+  createdAt: z.string(),
+  actor: userResponseSchema.optional(),
+});
+export type ActivityEventResponse = z.infer<typeof activityEventResponseSchema>;
