@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { api, ApiClientError } from '@/lib/api-client';
 import { useAuth } from '@/context/AuthContext';
 
@@ -92,6 +92,8 @@ function formatActivityType(type: string, metadata?: Record<string, unknown> | n
       return `deleted file "${metadata?.fileName || 'attachment'}"`;
     case 'TASK_ARCHIVED':
       return 'archived the task';
+    case 'TASK_DELETED':
+      return 'deleted this task';
     default:
       return type.toLowerCase().replace(/_/g, ' ');
   }
@@ -105,64 +107,73 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
   const [comments, setComments] = useState<CommentItem[]>([]);
   const [newComment, setNewComment] = useState('');
   const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsError, setCommentsError] = useState<string | null>(null);
   const [submittingComment, setSubmittingComment] = useState(false);
+  const [confirmDeleteCommentId, setConfirmDeleteCommentId] = useState<string | null>(null);
 
   // Attachments state
   const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
+  const [attachmentsError, setAttachmentsError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [confirmDeleteAttachmentId, setConfirmDeleteAttachmentId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Activity state
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState<string | null>(null);
 
-  const [error, setError] = useState<string | null>(null);
+  // General error banner
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Load comments
-  const loadComments = async () => {
+  const loadComments = useCallback(async () => {
     setCommentsLoading(true);
+    setCommentsError(null);
     try {
       const data = await api.get<{ comments: CommentItem[] }>(`/api/tasks/${taskId}/comments`);
       setComments(data.comments || []);
-    } catch (err) {
-      // Ignore
+    } catch {
+      setCommentsError('Failed to load comments.');
     } finally {
       setCommentsLoading(false);
     }
-  };
+  }, [taskId]);
 
   // Load attachments
-  const loadAttachments = async () => {
+  const loadAttachments = useCallback(async () => {
     setAttachmentsLoading(true);
+    setAttachmentsError(null);
     try {
       const data = await api.get<{ attachments: AttachmentItem[] }>(`/api/tasks/${taskId}/attachments`);
       setAttachments(data.attachments || []);
-    } catch (err) {
-      // Ignore
+    } catch {
+      setAttachmentsError('Failed to load attachments.');
     } finally {
       setAttachmentsLoading(false);
     }
-  };
+  }, [taskId]);
 
   // Load activity
-  const loadActivity = async () => {
+  const loadActivity = useCallback(async () => {
     setActivityLoading(true);
+    setActivityError(null);
     try {
       const data = await api.get<{ activity: ActivityItem[] }>(`/api/tasks/${taskId}/activity`);
       setActivity(data.activity || []);
-    } catch (err) {
-      // Ignore
+    } catch {
+      setActivityError('Failed to load activity log.');
     } finally {
       setActivityLoading(false);
     }
-  };
+  }, [taskId]);
 
   useEffect(() => {
     if (activeTab === 'comments') loadComments();
     if (activeTab === 'attachments') loadAttachments();
     if (activeTab === 'activity') loadActivity();
-  }, [taskId, activeTab]);
+  }, [taskId, activeTab, loadComments, loadAttachments, loadActivity]);
 
   // Submit comment
   const handleAddComment = async (e: React.FormEvent) => {
@@ -170,7 +181,7 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
     if (!newComment.trim()) return;
 
     setSubmittingComment(true);
-    setError(null);
+    setActionError(null);
     try {
       const res = await api.post<{ comment: CommentItem }>(`/api/tasks/${taskId}/comments`, {
         content: newComment.trim(),
@@ -179,9 +190,9 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
       setNewComment('');
     } catch (err) {
       if (err instanceof ApiClientError) {
-        setError(err.error.message);
+        setActionError(err.error.message);
       } else {
-        setError('Failed to post comment.');
+        setActionError('Failed to post comment.');
       }
     } finally {
       setSubmittingComment(false);
@@ -190,12 +201,13 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
 
   // Delete comment
   const handleDeleteComment = async (commentId: string) => {
-    if (!window.confirm('Are you sure you want to delete this comment?')) return;
+    setActionError(null);
     try {
       await api.delete(`/api/tasks/${taskId}/comments/${commentId}`);
       setComments((prev) => prev.filter((c) => c.id !== commentId));
+      setConfirmDeleteCommentId(null);
     } catch {
-      alert('Failed to delete comment.');
+      setActionError('Failed to delete comment.');
     }
   };
 
@@ -205,12 +217,13 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
     if (!file) return;
 
     if (file.size > 10 * 1024 * 1024) {
-      alert('File size exceeds the 10MB limit.');
+      setActionError('File size exceeds the 10MB limit (max 10MB allowed).');
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
     setUploading(true);
-    setError(null);
+    setActionError(null);
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -231,7 +244,7 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
       setAttachments((prev) => [json.attachment, ...prev]);
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      setActionError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setUploading(false);
     }
@@ -239,12 +252,13 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
 
   // Delete attachment
   const handleDeleteAttachment = async (attachmentId: string) => {
-    if (!window.confirm('Are you sure you want to delete this file?')) return;
+    setActionError(null);
     try {
       await api.delete(`/api/tasks/${taskId}/attachments/${attachmentId}`);
       setAttachments((prev) => prev.filter((a) => a.id !== attachmentId));
+      setConfirmDeleteAttachmentId(null);
     } catch {
-      alert('Failed to delete attachment.');
+      setActionError('Failed to delete attachment.');
     }
   };
 
@@ -262,13 +276,14 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
   };
 
   return (
-    <div className="border-t border-gray-200 pt-5 mt-6">
+    <div className="border-t border-gray-200 pt-5 mt-6" data-testid="task-collaboration-tabs">
       {/* Tab Navigation */}
       <div className="flex border-b border-gray-200 space-x-6 text-sm font-medium">
         <button
           type="button"
           onClick={() => setActiveTab('comments')}
-          className={`pb-2.5 flex items-center gap-1.5 transition-colors border-b-2 ${
+          data-testid="tab-comments"
+          className={`pb-2.5 flex items-center gap-1.5 transition-colors border-b-2 cursor-pointer ${
             activeTab === 'comments'
               ? 'border-primary-600 text-primary-600 font-semibold'
               : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -279,7 +294,8 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
         <button
           type="button"
           onClick={() => setActiveTab('attachments')}
-          className={`pb-2.5 flex items-center gap-1.5 transition-colors border-b-2 ${
+          data-testid="tab-attachments"
+          className={`pb-2.5 flex items-center gap-1.5 transition-colors border-b-2 cursor-pointer ${
             activeTab === 'attachments'
               ? 'border-primary-600 text-primary-600 font-semibold'
               : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -290,7 +306,8 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
         <button
           type="button"
           onClick={() => setActiveTab('activity')}
-          className={`pb-2.5 flex items-center gap-1.5 transition-colors border-b-2 ${
+          data-testid="tab-activity"
+          className={`pb-2.5 flex items-center gap-1.5 transition-colors border-b-2 cursor-pointer ${
             activeTab === 'activity'
               ? 'border-primary-600 text-primary-600 font-semibold'
               : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -300,21 +317,32 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
         </button>
       </div>
 
-      {error && (
-        <div className="mt-3 p-2.5 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg">
-          {error}
+      {/* Dismissible Error Banner */}
+      {actionError && (
+        <div className="mt-3 p-2.5 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between" data-testid="collab-error-banner">
+          <span>{actionError}</span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="text-red-500 hover:text-red-800 ml-2 font-bold"
+            aria-label="Dismiss error"
+          >
+            ✕
+          </button>
         </div>
       )}
 
       {/* 1. Comments Tab */}
       {activeTab === 'comments' && (
-        <div className="mt-4 space-y-4">
+        <div className="mt-4 space-y-4" data-testid="comments-tab-content">
           {/* Add comment form */}
           <form onSubmit={handleAddComment} className="space-y-2">
             <textarea
               className="w-full text-sm rounded-lg border border-gray-300 p-2.5 focus:ring-2 focus:ring-primary-500 focus:outline-none transition-colors"
               rows={2}
               placeholder="Write a comment..."
+              aria-label="Write a comment"
+              data-testid="comment-textarea"
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
               disabled={submittingComment}
@@ -323,7 +351,8 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
               <button
                 type="submit"
                 disabled={submittingComment || !newComment.trim()}
-                className="px-3.5 py-1.5 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors shadow-sm"
+                data-testid="post-comment-btn"
+                className="px-3.5 py-1.5 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors shadow-sm cursor-pointer"
               >
                 {submittingComment ? 'Posting...' : 'Post Comment'}
               </button>
@@ -332,26 +361,76 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
 
           {/* Comments list */}
           {commentsLoading ? (
-            <div className="text-center py-4 text-xs text-gray-400">Loading comments...</div>
+            <div className="space-y-3 pt-2 animate-pulse" data-testid="comments-loading">
+              <div className="p-3 bg-gray-50 rounded-lg border border-gray-100 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="h-3 w-24 bg-gray-200 rounded" />
+                  <div className="h-2.5 w-12 bg-gray-200 rounded" />
+                </div>
+                <div className="h-3 w-3/4 bg-gray-200 rounded" />
+              </div>
+            </div>
+          ) : commentsError ? (
+            <div className="text-center py-6 px-4 bg-red-50/50 rounded-xl border border-red-100">
+              <p className="text-xs text-red-600 mb-2">{commentsError}</p>
+              <button
+                type="button"
+                onClick={loadComments}
+                className="px-3 py-1 text-xs bg-white border border-red-200 text-red-700 rounded-lg hover:bg-red-50"
+              >
+                Retry
+              </button>
+            </div>
           ) : comments.length === 0 ? (
-            <div className="text-center py-6 text-xs text-gray-400">No comments yet. Start the conversation!</div>
+            <div className="text-center py-8 px-4 bg-gray-50/50 rounded-xl border border-dashed border-gray-200" data-testid="comments-empty">
+              <span className="text-2xl block mb-2">💬</span>
+              <p className="text-xs font-semibold text-gray-700">No comments yet</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">Start the conversation with your team by leaving a comment above.</p>
+            </div>
           ) : (
             <div className="space-y-3 pt-2">
               {comments.map((comment) => (
-                <div key={comment.id} className="p-3 bg-gray-50/75 rounded-lg border border-gray-100 space-y-1">
+                <div
+                  key={comment.id}
+                  data-testid={`comment-item-${comment.id}`}
+                  className="p-3 bg-gray-50/75 rounded-lg border border-gray-100 space-y-1"
+                >
                   <div className="flex items-center justify-between text-xs text-gray-500">
                     <span className="font-semibold text-gray-900">{comment.author?.name || 'User'}</span>
                     <div className="flex items-center gap-2">
                       <span>{timeAgo(comment.createdAt)}</span>
                       {user?.id === comment.authorId && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteComment(comment.id)}
-                          className="text-gray-400 hover:text-red-600 transition-colors"
-                          title="Delete comment"
-                        >
-                          🗑️
-                        </button>
+                        confirmDeleteCommentId === comment.id ? (
+                          <div className="flex items-center gap-1.5 bg-red-50 px-2 py-0.5 rounded text-[11px]">
+                            <span className="text-red-700">Delete?</span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteComment(comment.id)}
+                              className="text-red-600 font-bold hover:underline cursor-pointer"
+                              data-testid={`confirm-delete-comment-${comment.id}`}
+                            >
+                              Yes
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteCommentId(null)}
+                              className="text-gray-500 hover:underline cursor-pointer"
+                            >
+                              No
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteCommentId(comment.id)}
+                            className="text-gray-400 hover:text-red-600 transition-colors cursor-pointer"
+                            title="Delete comment"
+                            aria-label="Delete comment"
+                            data-testid={`delete-comment-btn-${comment.id}`}
+                          >
+                            🗑️
+                          </button>
+                        )
                       )}
                     </div>
                   </div>
@@ -365,12 +444,12 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
 
       {/* 2. Attachments Tab */}
       {activeTab === 'attachments' && (
-        <div className="mt-4 space-y-4">
+        <div className="mt-4 space-y-4" data-testid="attachments-tab-content">
           {/* Upload trigger */}
           <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-dashed border-gray-300">
             <div>
               <p className="text-xs font-medium text-gray-800">Attach files to this task</p>
-              <p className="text-[11px] text-gray-400">PDF, PNG, JPG, Word, Excel, CSV (Max 10MB)</p>
+              <p className="text-[11px] text-gray-400">PDF, PNG, JPG, Word, Excel, CSV, TXT (Max 10MB)</p>
             </div>
             <div>
               <input
@@ -380,9 +459,11 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
                 disabled={uploading}
                 className="hidden"
                 id="file-upload-input"
+                data-testid="file-upload-input"
               />
               <label
                 htmlFor="file-upload-input"
+                data-testid="upload-file-btn"
                 className={`px-3 py-1.5 text-xs font-medium text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary-200 rounded-lg cursor-pointer transition-colors ${
                   uploading ? 'opacity-50 cursor-not-allowed' : ''
                 }`}
@@ -394,14 +475,40 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
 
           {/* Attachments list */}
           {attachmentsLoading ? (
-            <div className="text-center py-4 text-xs text-gray-400">Loading attachments...</div>
+            <div className="space-y-2 animate-pulse" data-testid="attachments-loading">
+              <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-5 h-5 bg-gray-200 rounded" />
+                  <div className="space-y-1">
+                    <div className="h-3 w-32 bg-gray-200 rounded" />
+                    <div className="h-2 w-16 bg-gray-200 rounded" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : attachmentsError ? (
+            <div className="text-center py-6 px-4 bg-red-50/50 rounded-xl border border-red-100">
+              <p className="text-xs text-red-600 mb-2">{attachmentsError}</p>
+              <button
+                type="button"
+                onClick={loadAttachments}
+                className="px-3 py-1 text-xs bg-white border border-red-200 text-red-700 rounded-lg hover:bg-red-50"
+              >
+                Retry
+              </button>
+            </div>
           ) : attachments.length === 0 ? (
-            <div className="text-center py-6 text-xs text-gray-400">No attachments uploaded yet.</div>
+            <div className="text-center py-8 px-4 bg-gray-50/50 rounded-xl border border-dashed border-gray-200" data-testid="attachments-empty">
+              <span className="text-2xl block mb-2">📎</span>
+              <p className="text-xs font-semibold text-gray-700">No attachments uploaded yet</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">Files uploaded to this task will be safely kept and accessible here.</p>
+            </div>
           ) : (
             <div className="space-y-2">
               {attachments.map((file) => (
                 <div
                   key={file.id}
+                  data-testid={`attachment-item-${file.id}`}
                   className="p-2.5 bg-white rounded-lg border border-gray-200 flex items-center justify-between text-xs hover:border-gray-300 transition-colors"
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
@@ -416,20 +523,44 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
+                      data-testid={`download-attachment-${file.id}`}
                       onClick={() => handleDownloadAttachment(file.id, file.fileName)}
-                      className="px-2 py-1 text-xs text-primary-600 hover:text-primary-800 font-medium hover:bg-primary-50 rounded"
+                      className="px-2 py-1 text-xs text-primary-600 hover:text-primary-800 font-medium hover:bg-primary-50 rounded cursor-pointer"
                     >
                       Download
                     </button>
                     {(user?.id === file.uploadedById || user) && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteAttachment(file.id)}
-                        className="text-gray-400 hover:text-red-600 px-1 py-1"
-                        title="Delete file"
-                      >
-                        ✕
-                      </button>
+                      confirmDeleteAttachmentId === file.id ? (
+                        <div className="flex items-center gap-1.5 bg-red-50 px-2 py-0.5 rounded text-[11px]">
+                          <span className="text-red-700">Delete?</span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteAttachment(file.id)}
+                            className="text-red-600 font-bold hover:underline cursor-pointer"
+                            data-testid={`confirm-delete-attachment-${file.id}`}
+                          >
+                            Yes
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteAttachmentId(null)}
+                            className="text-gray-500 hover:underline cursor-pointer"
+                          >
+                            No
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteAttachmentId(file.id)}
+                          className="text-gray-400 hover:text-red-600 px-1 py-1 cursor-pointer"
+                          title="Delete file"
+                          aria-label="Delete file"
+                          data-testid={`delete-attachment-btn-${file.id}`}
+                        >
+                          ✕
+                        </button>
+                      )
                     )}
                   </div>
                 </div>
@@ -441,15 +572,39 @@ export function TaskCollaborationTabs({ taskId }: { taskId: string }) {
 
       {/* 3. Activity Tab */}
       {activeTab === 'activity' && (
-        <div className="mt-4">
+        <div className="mt-4" data-testid="activity-tab-content">
           {activityLoading ? (
-            <div className="text-center py-4 text-xs text-gray-400">Loading activity...</div>
+            <div className="space-y-3 pl-2 animate-pulse" data-testid="activity-loading">
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-gray-200" />
+                <div className="h-3 w-48 bg-gray-200 rounded" />
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-gray-200" />
+                <div className="h-3 w-36 bg-gray-200 rounded" />
+              </div>
+            </div>
+          ) : activityError ? (
+            <div className="text-center py-6 px-4 bg-red-50/50 rounded-xl border border-red-100">
+              <p className="text-xs text-red-600 mb-2">{activityError}</p>
+              <button
+                type="button"
+                onClick={loadActivity}
+                className="px-3 py-1 text-xs bg-white border border-red-200 text-red-700 rounded-lg hover:bg-red-50"
+              >
+                Retry
+              </button>
+            </div>
           ) : activity.length === 0 ? (
-            <div className="text-center py-6 text-xs text-gray-400">No activity recorded for this task yet.</div>
+            <div className="text-center py-8 px-4 bg-gray-50/50 rounded-xl border border-dashed border-gray-200" data-testid="activity-empty">
+              <span className="text-2xl block mb-2">📜</span>
+              <p className="text-xs font-semibold text-gray-700">No activity recorded yet</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">Task updates, comments, and attachments will show up here chronologically.</p>
+            </div>
           ) : (
             <div className="space-y-3 pl-2 border-l-2 border-gray-100">
               {activity.map((event) => (
-                <div key={event.id} className="relative pl-3 text-xs">
+                <div key={event.id} data-testid={`activity-item-${event.id}`} className="relative pl-3 text-xs">
                   <span className="absolute -left-[17px] top-1 w-2.5 h-2.5 rounded-full bg-primary-400 ring-4 ring-white" />
                   <p className="text-gray-800 leading-relaxed">
                     <span className="font-semibold text-gray-900">{event.actor?.name || 'Someone'}</span>{' '}

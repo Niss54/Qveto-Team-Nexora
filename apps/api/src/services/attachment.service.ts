@@ -1,6 +1,5 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/errorHandler.js';
@@ -8,15 +7,7 @@ import {
   ALLOWED_ATTACHMENT_MIME_TYPES,
   MAX_ATTACHMENT_SIZE_BYTES,
 } from '@qveto/shared';
-
-const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
-
-// Ensure upload directory exists
-async function ensureUploadDir(): Promise<void> {
-  if (!existsSync(UPLOADS_DIR)) {
-    await fs.mkdir(UPLOADS_DIR, { recursive: true });
-  }
-}
+import { storageService } from './storage.service.js';
 
 export class AttachmentService {
   /**
@@ -115,7 +106,7 @@ export class AttachmentService {
 
   /**
    * POST /api/tasks/:taskId/attachments
-   * Save uploaded file to private storage, validate type/size, and create DB record.
+   * Save uploaded file to secure storage (local or S3/R2), validate type/size, and create DB record.
    */
   async uploadAttachment(
     taskId: string,
@@ -159,20 +150,27 @@ export class AttachmentService {
       );
     }
 
-    await ensureUploadDir();
+    // Prepare buffer
+    let fileBuffer = file.buffer;
+    if (!fileBuffer && file.path) {
+      fileBuffer = await fs.readFile(file.path);
+    }
+
+    if (!fileBuffer) {
+      throw new AppError(400, 'BAD_REQUEST', 'Missing file payload');
+    }
 
     // Prevent path traversal by sanitizing filename and using UUID storage key
     const sanitizedOriginalName = path.basename(file.originalname);
     const extension = path.extname(sanitizedOriginalName);
     const safeKey = `${uuidv4()}${extension}`;
-    const targetPath = path.join(UPLOADS_DIR, safeKey);
 
-    if (file.buffer) {
-      await fs.writeFile(targetPath, file.buffer);
-    } else if (file.path) {
-      await fs.rename(file.path, targetPath);
-    } else {
-      throw new AppError(400, 'BAD_REQUEST', 'Missing file payload');
+    // Upload to configured storage provider (Local, S3, or R2)
+    const { storagePath } = await storageService.uploadFile(safeKey, fileBuffer, file.mimetype);
+
+    // Clean up temporary multipart upload file if present
+    if (file.path) {
+      await fs.unlink(file.path).catch(() => {});
     }
 
     return prisma.$transaction(async (tx) => {
@@ -181,7 +179,7 @@ export class AttachmentService {
           fileName: sanitizedOriginalName,
           fileSize: file.size,
           mimeType: file.mimetype,
-          storagePath: safeKey,
+          storagePath,
           taskId,
           uploadedById: userId,
         },
@@ -234,7 +232,7 @@ export class AttachmentService {
 
   /**
    * GET /api/tasks/:taskId/attachments/:id/download
-   * Verified private file download.
+   * Verified private file download or pre-signed URL.
    */
   async getAttachmentFileForDownload(
     taskId: string,
@@ -251,21 +249,21 @@ export class AttachmentService {
       throw new AppError(404, 'NOT_FOUND', 'Attachment not found');
     }
 
-    // Path traversal defense: resolve against UPLOADS_DIR
-    const resolvedPath = path.resolve(UPLOADS_DIR, attachment.storagePath);
-    if (!resolvedPath.startsWith(UPLOADS_DIR)) {
-      throw new AppError(403, 'FORBIDDEN', 'Invalid file path traversal detected');
-    }
+    try {
+      const target = await storageService.getDownloadTarget(
+        attachment.storagePath,
+        attachment.fileName,
+      );
 
-    if (!existsSync(resolvedPath)) {
+      return {
+        filePath: target.filePath,
+        downloadUrl: target.downloadUrl,
+        fileName: attachment.fileName,
+        mimeType: attachment.mimeType,
+      };
+    } catch {
       throw new AppError(404, 'NOT_FOUND', 'File data does not exist on storage');
     }
-
-    return {
-      filePath: resolvedPath,
-      fileName: attachment.fileName,
-      mimeType: attachment.mimeType,
-    };
   }
 
   /**
@@ -319,13 +317,31 @@ export class AttachmentService {
       });
     });
 
-    // Remove file from disk asynchronously if it exists
-    const resolvedPath = path.resolve(UPLOADS_DIR, attachment.storagePath);
-    if (resolvedPath.startsWith(UPLOADS_DIR) && existsSync(resolvedPath)) {
-      await fs.unlink(resolvedPath).catch(() => {});
-    }
+    // Remove file from storage (Local or S3/R2)
+    await storageService.deleteFile(attachment.storagePath).catch(() => {});
 
     return { success: true };
+  }
+
+  /**
+   * Clean up all attachment files and records associated with a task.
+   * Useful when tasks are permanently removed or archived with cleanup.
+   */
+  async cleanupTaskAttachments(taskId: string) {
+    const attachments = await prisma.attachment.findMany({
+      where: { taskId },
+      select: { id: true, storagePath: true },
+    });
+
+    if (attachments.length > 0) {
+      const paths = attachments.map((a) => a.storagePath);
+      await storageService.deleteFiles(paths).catch(() => {});
+      await prisma.attachment.deleteMany({
+        where: { taskId },
+      }).catch(() => {});
+    }
+
+    return { cleanedCount: attachments.length };
   }
 }
 

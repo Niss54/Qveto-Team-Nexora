@@ -90,7 +90,17 @@ attachmentsRouter.get(
         authReq.user.id,
       );
 
-      res.download(file.filePath, file.fileName);
+      if (file.downloadUrl) {
+        res.redirect(file.downloadUrl);
+        return;
+      }
+
+      if (file.filePath) {
+        res.download(file.filePath, file.fileName);
+        return;
+      }
+
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Attachment file not found' } });
     } catch (error) {
       next(error);
     }
