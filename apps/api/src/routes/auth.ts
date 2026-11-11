@@ -9,7 +9,7 @@ const authRouter: ReturnType<typeof Router> = Router();
 const cookieOptions = {
   httpOnly: true,
   secure: env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
+  sameSite: (env.NODE_ENV === 'production' ? 'none' : 'lax') as 'none' | 'lax',
   maxAge: env.SESSION_MAX_AGE_MS,
   path: '/',
 };

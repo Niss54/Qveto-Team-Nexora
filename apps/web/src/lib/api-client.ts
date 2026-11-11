@@ -1,4 +1,10 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const isBrowser = typeof window !== 'undefined';
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL !== undefined
+    ? process.env.NEXT_PUBLIC_API_URL
+    : isBrowser && window.location.hostname.includes('vercel.app')
+      ? ''
+      : 'http://localhost:4000';
 
 /**
  * Centralized API client with credentials support and error handling.

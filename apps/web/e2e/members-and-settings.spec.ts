@@ -133,7 +133,7 @@ test.describe('Members & Settings Navigation and UI (Amrutha Workstream)', () =>
     await page.goto('/settings');
 
     await expect(page.locator('h1')).toContainText('Organization Settings');
-    await expect(page.getByDisplayValue('Nexora Corp')).toBeVisible();
+    await expect(page.locator('input[value="Nexora Corp"]')).toBeVisible();
     await expect(page.getByText('Tenant Security & Isolation Diagnostic')).toBeVisible();
   });
 });
