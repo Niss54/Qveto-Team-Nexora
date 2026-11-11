@@ -6,17 +6,24 @@ import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { RoleBadge } from './RoleBadge';
 
+interface NavItem {
+  name: string;
+  href: string;
+  icon: string;
+  badge?: string;
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const { currentOrg } = useAuth();
 
-  const navigation = [
+  const navigation: NavItem[] = [
     { name: 'Dashboard', href: '/dashboard', icon: '📊' },
     { name: 'Workspaces', href: '/workspaces', icon: '🏢' },
     { name: 'Projects', href: '/projects', icon: '📁' },
     { name: 'Tasks & Kanban', href: '/tasks', icon: '📋' },
-    { name: 'Members & Roles', href: '/members', icon: '👥', badge: 'Soon' },
-    { name: 'Settings', href: '/settings', icon: '⚙️', badge: 'Soon' },
+    { name: 'Members & Roles', href: '/members', icon: '👥' },
+    { name: 'Settings', href: '/settings', icon: '⚙️' },
   ];
 
   return (
