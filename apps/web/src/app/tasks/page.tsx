@@ -55,6 +55,8 @@ export default function TasksPage() {
   const { user, loading: authLoading, currentOrg } = useAuth();
   const [projectInput, setProjectInput] = useState('');
   const [projectId, setProjectId] = useState('');
+  const [availableProjects, setAvailableProjects] = useState<Array<{ id: string; name: string; workspaceName: string }>>([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
   const [board, setBoard] = useState<Board>({ columns: emptyColumns(), total: 0 });
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -108,6 +110,56 @@ export default function TasksPage() {
     setProjectInput(stored);
     setProjectId(stored);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (!currentOrg?.id) {
+      setAvailableProjects([]);
+      return;
+    }
+    setLoadingProjects(true);
+    void (async () => {
+      try {
+        const wsRes = await api.get<{ data: Array<{ id: string; name: string }> }>(
+          `/api/organizations/${currentOrg.id}/workspaces?page=1&pageSize=50`,
+        );
+        const projectsList: Array<{ id: string; name: string; workspaceName: string }> = [];
+        await Promise.all(
+          (wsRes.data || []).map(async (ws) => {
+            try {
+              const projRes = await api.get<{ data: Array<{ id: string; name: string }> }>(
+                `/api/workspaces/${ws.id}/projects?page=1&pageSize=50`,
+              );
+              for (const p of projRes.data || []) {
+                projectsList.push({ id: p.id, name: p.name, workspaceName: ws.name });
+              }
+            } catch {
+              // ignore
+            }
+          }),
+        );
+        if (active) {
+          setAvailableProjects(projectsList);
+          const stored = window.sessionStorage.getItem(projectKey) || '';
+          if (stored && projectsList.some((p) => p.id === stored)) {
+            setProjectId(stored);
+            setProjectInput(stored);
+          } else if (projectsList.length > 0 && !projectId) {
+            setProjectId(projectsList[0].id);
+            setProjectInput(projectsList[0].id);
+            window.sessionStorage.setItem(projectKey, projectsList[0].id);
+          }
+        }
+      } catch {
+        if (active) setAvailableProjects([]);
+      } finally {
+        if (active) setLoadingProjects(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [currentOrg?.id]);
 
   const refresh = useCallback(async () => {
     if (!projectId || !currentOrg) {
@@ -392,12 +444,57 @@ export default function TasksPage() {
         <button type="button" onClick={() => void refresh()} disabled={loading || busy || !projectId} className="btn-primary disabled:opacity-50">Refresh board</button>
       </header>
 
-      <form onSubmit={chooseProject} className="card p-4 flex flex-col sm:flex-row gap-3 sm:items-end">
-        <label className="flex-1 text-sm font-semibold text-gray-700">Project ID
-          <input className="input-field mt-1 w-full" value={projectInput} onChange={(e) => setProjectInput(e.target.value)} placeholder="Paste a project ID from your project workspace" aria-label="Project ID" required />
-        </label>
-        <button className="btn-primary" type="submit">Open project</button>
-      </form>
+      <div className="card p-4 flex flex-col md:flex-row gap-4 items-stretch md:items-end justify-between">
+        <div className="flex-1 space-y-1">
+          <label className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            Active Project Board
+          </label>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <select
+              value={projectId}
+              onChange={(e) => {
+                const val = e.target.value;
+                setProjectId(val);
+                setProjectInput(val);
+                window.sessionStorage.setItem(projectKey, val);
+                setSelected(null);
+              }}
+              disabled={loadingProjects}
+              className="input-field text-sm flex-1 font-medium text-gray-800"
+            >
+              {availableProjects.length === 0 ? (
+                <option value="">{loadingProjects ? 'Loading projects...' : 'No projects found in organization'}</option>
+              ) : (
+                availableProjects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.workspaceName})
+                  </option>
+                ))
+              )}
+            </select>
+
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              disabled={loading || busy || !projectId}
+              className="btn-secondary text-sm whitespace-nowrap"
+            >
+              🔄 Refresh
+            </button>
+          </div>
+        </div>
+
+        <form onSubmit={chooseProject} className="flex gap-2 items-center">
+          <input
+            className="input-field text-xs py-2 w-48 font-mono"
+            value={projectInput}
+            onChange={(e) => setProjectInput(e.target.value)}
+            placeholder="Or custom Project ID..."
+            aria-label="Custom Project ID"
+          />
+          <button className="btn-secondary text-xs py-2" type="submit">Set</button>
+        </form>
+      </div>
       {!currentOrg && <p className="rounded-lg bg-amber-50 p-4 text-amber-800">Select an organization from the navigation bar before opening a project.</p>}
       {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
