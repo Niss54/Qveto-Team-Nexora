@@ -78,6 +78,14 @@ export function createApp(
   app.use(requestIdMiddleware);
   app.use(loggerMiddleware);
 
+  // Normalize duplicate slashes in request URLs
+  app.use((req, _res, next) => {
+    if (req.url && req.url.includes('//')) {
+      req.url = req.url.replace(/\/{2,}/g, '/');
+    }
+    next();
+  });
+
   // Routes
   app.use('/api', healthRouter);
   app.use('/api/auth', authRouter);
