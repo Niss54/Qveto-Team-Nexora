@@ -313,6 +313,63 @@ export default function DashboardPage() {
     }
   };
 
+  const handleExportCSV = () => {
+    if (!analyticsData || !currentOrg) return;
+    const rows = [
+      ['Metric', 'Value'],
+      ['Organization', currentOrg.name],
+      ['Total Tasks', String(analyticsData.overview.totalTasks)],
+      ['Completed Tasks', String(analyticsData.overview.completedTasks)],
+      ['Open Tasks', String(analyticsData.overview.openTasks)],
+      ['Overdue Tasks', String(analyticsData.overview.overdueTasks)],
+      ['Completion Rate (%)', String(analyticsData.overview.completionRate)],
+      ['On-Time Completion Rate (%)', String(analyticsData.overview.onTimeCompletionRate)],
+      ['Assignment Coverage (%)', String(analyticsData.overview.assignmentCoverage)],
+      [],
+      ['Task Status', 'Count'],
+      ['TODO', String(analyticsData.statusDistribution.TODO)],
+      ['IN_PROGRESS', String(analyticsData.statusDistribution.IN_PROGRESS)],
+      ['IN_REVIEW', String(analyticsData.statusDistribution.IN_REVIEW)],
+      ['DONE', String(analyticsData.statusDistribution.DONE)],
+      [],
+      ['Priority', 'Count'],
+      ['LOW', String(analyticsData.priorityDistribution.LOW)],
+      ['MEDIUM', String(analyticsData.priorityDistribution.MEDIUM)],
+      ['HIGH', String(analyticsData.priorityDistribution.HIGH)],
+      ['URGENT', String(analyticsData.priorityDistribution.URGENT)],
+      [],
+      ['Project Name', 'Total Tasks', 'Completed', 'Overdue', 'Progress %'],
+      ...analyticsData.projectProgress.map((p) => [
+        `"${p.name.replace(/"/g, '""')}"`,
+        String(p.totalTasks),
+        String(p.completedTasks),
+        String(p.overdueTasks),
+        String(p.progressPercentage),
+      ]),
+      [],
+      ['Assignee', 'Total Tasks', 'Open Tasks', 'Completed Tasks', 'Overdue Tasks'],
+      ...analyticsData.workloadByAssignee.map((w) => [
+        `"${w.name.replace(/"/g, '""')}"`,
+        String(w.totalTasks),
+        String(w.openTasks),
+        String(w.completedTasks),
+        String(w.overdueTasks),
+      ]),
+    ];
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((e) => e.join(',')).join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute(
+      'download',
+      `qveto-analytics-${currentOrg.slug}-${new Date().toISOString().slice(0, 10)}.csv`,
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Add Member Handler (OWNER only)
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -851,6 +908,13 @@ export default function DashboardPage() {
                   )}
                   <button onClick={fetchAnalytics} className="btn-secondary text-xs py-1.5 px-3">
                     Refresh
+                  </button>
+                  <button
+                    onClick={handleExportCSV}
+                    disabled={!analyticsData}
+                    className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <span>📥</span> Export CSV
                   </button>
                 </div>
               </div>
