@@ -1,10 +1,9 @@
-const isBrowser = typeof window !== 'undefined';
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL !== undefined
-    ? process.env.NEXT_PUBLIC_API_URL
-    : isBrowser && window.location.hostname.includes('vercel.app')
-      ? ''
-      : 'http://localhost:4000';
+  process.env.NEXT_PUBLIC_API_URL && process.env.NEXT_PUBLIC_API_URL.trim() !== ''
+    ? process.env.NEXT_PUBLIC_API_URL.replace(/\/+$/, '')
+    : process.env.NODE_ENV === 'development'
+      ? 'http://localhost:4000'
+      : 'https://qveto-team-nexora.onrender.com';
 
 /**
  * Centralized API client with credentials support and error handling.
