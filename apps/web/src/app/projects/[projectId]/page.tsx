@@ -179,10 +179,12 @@ export default function ProjectDetailPage() {
           <p className="mt-1 text-sm text-gray-600">{project.description || 'No description'}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="btn-secondary text-sm" type="button" onClick={() => {
+          <button className="btn-primary text-sm flex items-center gap-1.5" type="button" onClick={() => {
             window.sessionStorage.setItem('qveto-prd03-project-id', project.id);
             router.push('/tasks');
-          }}>Open tasks</button>
+          }}>
+            <span>📋</span> View Kanban Board
+          </button>
           {canManage && <button className="btn-secondary text-sm" type="button" disabled={saving} onClick={() => void setArchived(!isArchived)}>{isArchived ? 'Restore project' : 'Archive project'}</button>}
         </div>
       </header>

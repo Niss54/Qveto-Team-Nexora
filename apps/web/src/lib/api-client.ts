@@ -1,4 +1,9 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL && process.env.NEXT_PUBLIC_API_URL.trim() !== ''
+    ? process.env.NEXT_PUBLIC_API_URL.replace(/\/+$/, '')
+    : process.env.NODE_ENV === 'development'
+      ? 'http://localhost:4000'
+      : 'https://qveto-team-nexora.onrender.com';
 
 /**
  * Centralized API client with credentials support and error handling.
@@ -7,7 +12,9 @@ export async function apiClient<T>(
   endpoint: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const base = (API_BASE_URL || '').replace(/\/+$/, '');
+  const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const url = `${base}${path}`;
 
   const res = await fetch(url, {
     ...options,

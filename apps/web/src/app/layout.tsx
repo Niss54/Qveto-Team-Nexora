@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { AuthProvider } from '@/context/AuthContext';
 import { Navbar } from '@/components/Navbar';
+import { AppShell } from '@/components/AppShell';
 
 export const metadata: Metadata = {
   title: 'Qveto - Project Management & Team Collaboration',
@@ -20,7 +21,7 @@ export default function RootLayout({
         <AuthProvider>
           <div className="flex flex-col min-h-screen">
             <Navbar />
-            <div className="flex-1">{children}</div>
+            <AppShell>{children}</AppShell>
           </div>
         </AuthProvider>
       </body>
